@@ -1,32 +1,86 @@
-# Prerequisites
-*.d
-
-# Compiled Object files
-*.slo
-*.lo
-*.o
+# Build output
+/build*/
+/out/
+/bin/
+/obj/
+/target/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+CMakeUserPresets.json
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+Testing/
+_deps/
+*.exe
+*.dll
+*.lib
 *.obj
-
-# Precompiled Headers
-*.gch
-*.pch
-
-# Compiled Dynamic libraries
+*.pdb
+*.ilk
+*.exp
+*.o
+*.a
 *.so
 *.dylib
-*.dll
+*.msi
 
-# Fortran module files
-*.mod
-*.smod
+# IDE and Python
+.vs/
+.vscode/
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
 
-# Compiled Static libraries
-*.lai
-*.la
-*.a
-*.lib
+# Local game data, packages and restricted research material
+[Gg]ame/
+[Gg]ames/
+[Ff]irmware/
+[Ss]dk/
+[Gg][Dd][Kk][Xx]/
+[Pp]rivate/
+[Dd]umps/
+*.xvc
+*.msixvc
+*.appx
+*.msix
+*.xex
+*.xbe
+*.key
+*.pem
+*.pfx
+*.zip
+*.7z
+*.rar
 
-# Executables
-*.exe
-*.out
-*.app
+# Generated shader/pipeline data and diagnostics
+cache/
+shader-cache/
+pipeline-cache/
+*.dxil
+*.dxbc
+*.cso
+*.pso
+shader-inventory*.json
+logs/
+reports/
+*.log
+*.dmp
+*-report.txt
+*-REPORT.txt
+Revenge-GameInfo*/
+
+# Local configuration and OS files
+revenge.local.toml
+.env
+.env.*
+!.env.example
+.DS_Store
+Thumbs.db
+desktop.ini

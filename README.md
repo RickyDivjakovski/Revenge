@@ -10,13 +10,14 @@
 ![Language](https://img.shields.io/badge/C%2B%2B-20-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)
 ![Platform](https://img.shields.io/badge/target-Windows%20x64-0078D4?style=for-the-badge)
 ![Graphics](https://img.shields.io/badge/graphics-DirectX%2012-555555?style=for-the-badge)
+![License](https://img.shields.io/badge/license-GPL--3.0--or--later-64748B?style=for-the-badge)
 ![Status](https://img.shields.io/badge/status-early%20development-E5A00D?style=for-the-badge)
 
-![NVIDIA](https://img.shields.io/badge/NVIDIA-GeForce-76B900?style=flat-square&logo=nvidia&logoColor=white)
-![AMD](https://img.shields.io/badge/AMD-Radeon-ED1C24?style=flat-square&logo=amd&logoColor=white)
-![Intel](https://img.shields.io/badge/Intel-Arc-0071C5?style=flat-square&logo=intel&logoColor=white)
+![NVIDIA](https://img.shields.io/badge/NVIDIA-GeForce-76B900?style=flat-square)
+![AMD](https://img.shields.io/badge/AMD-Radeon-ED1C24?style=flat-square)
+![Intel](https://img.shields.io/badge/Intel-Arc-0071C5?style=flat-square)
 
-[Overview](#overview) · [Development progress](#development-progress) · [Roadmap](#roadmap) · [Build](#building-revenge) · [Usage](#using-revenge) · [Contributing](#contributing)
+[Overview](#overview) · [Development progress](#development-progress) · [Roadmap](#roadmap) · [Build](#building-revenge) · [Usage](#using-revenge) · [Contributing](#contributing) · [Legal](LEGAL.md) · [Licence](LICENSE)
 
 </div>
 
@@ -97,17 +98,9 @@ flowchart TD
 
 ### What has been achieved
 
-The current native codebase has passed a Linux C++20 Release build, its CTest suite and two Python shader tests. Offline preparation has also been validated against a supplied x64 Scarlett-format executable at its preferred and an alternate virtual image base.
+The current native codebase has passed a Linux C++20 Release build, its CTest suite and two Python shader tests. The portable tests exercise executable preparation using synthetic fixtures, including base relocations, IAT metadata and bounds validation.
 
-| Offline preparation metric | Observed result |
-| --- | ---: |
-| Mapped image size | 184,995,840 bytes |
-| AMD64 DIR64 relocations | 598,282 |
-| Direct import slots | 587 |
-| TLS callbacks identified | 2 |
-| Runtime function entries | 299,257 |
-
-These results demonstrate executable **preparation**, not execution. The mapped image is a non-executable data buffer; no imports were bound, no callbacks or title entry point were invoked, and no original game files were modified.
+These results demonstrate executable **preparation**, not execution. The mapped image is a non-executable data buffer; no imports are bound and no callbacks or title entry point are invoked. Title-specific diagnostic data is not distributed in this public snapshot.
 
 See [validation results](docs/VALIDATION.md) for details. Windows MSVC compilation, DXC integration and GPU execution have not yet been validated for this release.
 
@@ -318,7 +311,12 @@ Revenge/
 ├── tools/shaders.py         # Shader inventory and PC HLSL compiler
 ├── samples/                 # Known-answer HLSL fixture
 ├── tests/                   # C++ and Python tests
-└── docs/                    # Architecture and validation notes
+├── docs/                    # Architecture and validation notes
+├── LICENSE                  # GNU GPL v3 licence text
+├── LEGAL.md                 # Development and distribution policy
+├── CONTRIBUTING.md          # Contribution and provenance rules
+├── THIRD_PARTY_NOTICES.md   # Dependency and reference register
+└── .gitignore               # Local files excluded from version control
 ```
 
 ## Testing
@@ -342,6 +340,8 @@ python3 tests/test_shaders.py
 The portable test suite covers PE import parsing, range validation, relocation fixups and rejection of unsupported relocations, IAT slot indexing, dirty-page tracking, executable candidate selection and shader-container inventory/deduplication. See [validation](docs/VALIDATION.md).
 
 ## Contributing
+
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [LEGAL.md](LEGAL.md) before submitting changes. Document source provenance and preserve all required notices.
 
 Useful areas for future work include C++ systems programming, Windows PE/ABI research, Direct3D 12, GPU shader compilation, AMD RDNA2 ISA, memory management and performance profiling.
 
@@ -373,7 +373,11 @@ Further technical details are available in [docs/ARCHITECTURE.md](docs/ARCHITECT
 
 Revenge is an independent research project and is not affiliated with Microsoft, Xbox, NVIDIA, AMD, Intel or any game publisher. Their names and trademarks belong to their respective owners. Revenge does not distribute game files, confidential SDK components, firmware or encryption keys. Use only software and development materials you are authorised to access. The project does not aim to bypass licensing or authentication systems.
 
-A software licence has not yet been specified in the current Native source distribution. Check the repository's licence terms before copying, modifying or redistributing the project.
+Original Revenge Native source is licensed under the **GNU General Public License, version 3 or (at your option) any later version (GPL-3.0-or-later)**. See [LICENSE](LICENSE) for the full licence. Third-party material remains subject to its applicable terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+The Native branch is an independent reimplementation, not a formally audited two-team clean-room project. Revenge does not accept DRM circumvention, protected retail-package decryption, console key extraction, hypervisor bypass or unauthorised authentication bypass contributions. See [LEGAL.md](LEGAL.md) for project boundaries and [CONTRIBUTING.md](CONTRIBUTING.md) for provenance and testing requirements.
+
+The policy and licence are not a guarantee of legal compliance. Contributors and distributors must verify their rights, applicable agreements and local law.
 
 ---
 
