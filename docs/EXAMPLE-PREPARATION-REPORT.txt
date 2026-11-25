@@ -1,0 +1,86 @@
+Revenge Native - offline loader preparation
+Image bytes: 184995840
+Preferred base: 0x140000000
+Prepared base: 0x180000000
+Entry VA: 0x1856a1ec8
+DIR64 relocations: 598282
+IAT slots (unbound): 587
+TLS template bytes: 5248
+TLS zero fill bytes: 0
+TLS callbacks (not invoked): 2
+Unwind entries (not registered): 299257
+Delay imports present: 0
+Load config present: 1
+Xbox markers: 1
+
+Direct DLL inventory (presence is not ABI compatibility):
+  api-ms-win-core-processthreads-l1-1-2.dll - 1 imports
+  api-ms-win-core-processthreads-l1-1-0.dll - 12 imports
+  api-ms-win-core-libraryloader-l1-2-0.dll - 8 imports
+  api-ms-win-core-profile-l1-1-0.dll - 2 imports
+  MSVCP140.dll - 113 imports
+  api-ms-win-core-file-l1-1-0.dll - 22 imports
+  api-ms-win-core-localization-l1-2-3.dll - 1 imports
+  api-ms-win-core-errorhandling-l1-1-0.dll - 3 imports
+  api-ms-win-core-handle-l1-1-0.dll - 1 imports
+  api-ms-win-core-processenvironment-l1-1-0.dll - 1 imports
+  xmem.dll - 12 imports
+  api-ms-win-core-memory-l1-1-0.dll - 3 imports
+  api-ms-win-core-localization-l1-2-0.dll - 3 imports
+  api-ms-win-core-synch-l1-1-0.dll - 17 imports
+  api-ms-win-core-psm-appnotify-l1-1-0.dll - 2 imports
+  api-ms-win-core-psm-appnotify-l1-1-1.dll - 2 imports
+  api-ms-win-core-processthreads-l1-1-1.dll - 2 imports
+  api-ms-win-core-processtopology-l1-1-0.dll - 2 imports
+  api-ms-win-core-synch-l1-2-0.dll - 1 imports
+  api-ms-win-core-sysinfo-l1-1-0.dll - 6 imports
+  api-ms-win-core-debug-l1-1-0.dll - 2 imports
+  api-ms-win-core-windowserrorreporting-l1-1-0.dll - 1 imports
+  d3d12_xs.dll - 3 imports
+  ADVAPI32.dll - 3 imports
+  ext-ms-win-rtcore-ntuser-window-ansi-l1-1-0.dll - 3 imports
+  ext-ms-win-rtcore-ntuser-window-l1-1-0.dll - 1 imports
+  ext-ms-win-rtcore-ntuser-message-ansi-l1-1-0.dll - 2 imports
+  ext-ms-win-rtcore-ntuser-message-l1-1-0.dll - 1 imports
+  WS2_32.dll - 25 imports
+  api-ms-win-core-string-l1-1-0.dll - 2 imports
+  api-ms-win-core-file-l2-1-0.dll - 1 imports
+  api-ms-win-core-timezone-l1-1-0.dll - 2 imports
+  api-ms-win-core-sysinfo-l1-2-0.dll - 1 imports
+  api-ms-win-core-com-l1-1-0.dll - 7 imports
+  MFPlat.DLL - 6 imports
+  MFReadWrite.dll - 1 imports
+  WINHTTP.dll - 15 imports
+  api-ms-win-core-rtlsupport-l1-1-0.dll - 3 imports
+  api-ms-win-core-synch-l1-2-1.dll - 2 imports
+  api-ms-win-core-libraryloader-l1-2-1.dll - 1 imports
+  GameInput.dll - 1 imports
+  api-ms-win-core-string-obsolete-l1-1-0.dll - 1 imports
+  chad.dll - 5 imports
+  xg_xs.dll - 2 imports
+  XboxBvhBuilder.dll - 7 imports
+  XCRDAPI.dll - 1 imports
+  amd_fidelityfx_loader_xbox.dll - 4 imports
+  libHttpClient.GDK.dll - 38 imports
+  api-ms-win-core-namedpipe-l1-1-0.dll - 2 imports
+  xapu.dll - 5 imports
+  AcpHal.dll - 9 imports
+  Bink2Scarlett.dll - 23 imports
+  api-ms-win-core-datetime-l1-1-1.dll - 2 imports
+  bcrypt.dll - 3 imports
+  api-ms-win-core-heap-l2-1-0.dll - 1 imports
+  api-ms-win-core-interlocked-l1-1-0.dll - 1 imports
+  VCRUNTIME140.dll - 23 imports
+  VCRUNTIME140_1.dll - 1 imports
+  api-ms-win-crt-stdio-l1-1-0.dll - 29 imports
+  api-ms-win-crt-runtime-l1-1-0.dll - 25 imports
+  api-ms-win-crt-locale-l1-1-0.dll - 2 imports
+  api-ms-win-crt-time-l1-1-0.dll - 9 imports
+  api-ms-win-crt-math-l1-1-0.dll - 41 imports
+  api-ms-win-crt-convert-l1-1-0.dll - 12 imports
+  api-ms-win-crt-filesystem-l1-1-0.dll - 4 imports
+  api-ms-win-crt-string-l1-1-0.dll - 31 imports
+  api-ms-win-crt-utility-l1-1-0.dll - 4 imports
+  api-ms-win-crt-heap-l1-1-0.dll - 5 imports
+
+STOP: no executable memory allocated, no imports bound, no TLS or entry point invoked. Console ABI and graphics translation are not implemented.
