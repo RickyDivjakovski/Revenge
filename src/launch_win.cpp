@@ -1,5 +1,7 @@
 #include "revenge/launch.hpp"
 #include "revenge/loader.hpp"
+#include "revenge/runtime.hpp"
+#include <sstream>
 #include <fstream>
 #include <windows.h>
 #include <shobjidl.h>
@@ -54,12 +56,11 @@ int launch_dialog(){
             message(L"Xbox/Scarlett executable prepared (offline):\n"+exe->wstring()+L"\n\nUnbound imports: "+std::to_wstring(plan.slots.size())+L"\nReport: "+report.wstring()+L"\n\nGame execution is not supported yet. No game code was executed.",MB_ICONWARNING);return 2;
         }
         if(image.subsystem!=2 && image.subsystem!=3){message(L"This executable is not a recognised Windows GUI or console application.",MB_ICONWARNING);return 2;}
-        const auto prompt=L"No known Xbox markers were found. This does not prove Windows compatibility.\n\nLaunch this trusted Windows executable directly (not through Xbox emulation)?\n"+exe->wstring();
+        const auto prompt=L"No known Xbox markers were found. This does not prove Windows compatibility.\n\nLaunch this trusted Windows executable in a supervised process (not Xbox emulation)?\nThe process will have a one-hour limit.\n"+exe->wstring();
         if(MessageBoxW(nullptr,prompt.c_str(),L"Revenge - Confirm launch",MB_YESNO|MB_ICONQUESTION|MB_DEFBUTTON2|MB_SETFOREGROUND)!=IDYES)return 0;
-        STARTUPINFOW startup{};startup.cb=sizeof(startup);PROCESS_INFORMATION process{};
-        std::wstring command=L"\""+exe->wstring()+L"\"";
-        if(!CreateProcessW(exe->c_str(),command.data(),nullptr,nullptr,FALSE,0,nullptr,exe->parent_path().c_str(),&startup,&process))throw std::system_error(static_cast<int>(GetLastError()),std::system_category(),"Game process could not start");
-        CloseHandle(process.hThread);CloseHandle(process.hProcess);return 0;
+        std::ostringstream result;
+        const int status=run_windows(*exe,3600,false,result);
+        message(widen(result.str()),status?MB_ICONWARNING:MB_ICONINFORMATION);return status;
     }catch(const std::exception& e){message(widen(e.what()),MB_ICONERROR);return 1;}
 }
 }

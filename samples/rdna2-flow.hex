@@ -1,0 +1,8 @@
+# Independent forward-branch fixture: v0=id.x, s0=id.x/64
+380000ff 3f800000
+bf0aa000
+bf840003
+060000ff 3f800000
+bf820002
+100000ff 40000000
+bf810000

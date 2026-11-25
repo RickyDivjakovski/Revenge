@@ -1,0 +1,11 @@
+# Texture layout research foundation
+
+`texture.hpp` defines independent typed descriptors for 2D texture arrays, mip chains and RGBA8, BGRA8, R8, BC1 and BC3 payloads. The source is either tightly packed rows or an explicitly defined 8x8 Morton layout in block coordinates. Tiles are ordered by row and padded in full, even at partial edges. Subresources are layer-major, mip-minor. This is not an Xbox resource descriptor or hardware address library.
+
+The planner bounds allocations to 256 MiB per buffer and 4,096 subresources. It uses conservative 256-byte row and 512-byte subresource alignment, including final row padding. Actual Windows texture uploads must use the device's GetCopyableFootprints. Conversion copies uncompressed pixels or opaque BC blocks; it does not decompress or transcode BC formats. The CPU sampler is a normalized-coordinate point/bilinear model for uncompressed formats only, with clamp or wrap and an explicit mip/layer. No anisotropy, automatic LOD, filtering across mips or console texture instructions.
+
+The compute fixture reads 4,096 words from a synthetic 64x64 Morton8 layout and writes them linearly. The known-answer output is generated independently of the tile index. It uses existing root SRV/UAV bindings and a fence-verified readback. It does not upload a real tiled Xbox texture, decode RDNA2 MIMG instructions or measure game performance.
+
+The fixed desktop triangle graphics PSO cache includes adapter identity, driver version where available, serialized root signature, exact VS and PS bytecode, and an explicit state schema tag. The tag must change if any fixed non-shader PSO state changes. It is not a general graphics-state serializer. Driver rejection retries normal creation, and blobs are saved only after pixel verification. Use locally generated disposable cache files; integrity checks are not authentication.
+
+Public references: [texture upload](https://learn.microsoft.com/en-us/windows/win32/direct3d12/upload-and-readback-of-texture-data), [GetCopyableFootprints](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/nf-d3d12-id3d12device-getcopyablefootprints), [cached pipeline state](https://learn.microsoft.com/en-us/windows/win32/api/d3d12/ns-d3d12-d3d12_cached_pipeline_state). No proprietary layout code or assets incorporated.

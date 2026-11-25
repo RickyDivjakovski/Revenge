@@ -1,4 +1,6 @@
 #include "revenge/loader.hpp"
+#include "revenge/runtime.hpp"
+#include "revenge/system.hpp"
 #include "revenge/launch.hpp"
 #include <algorithm>
 #include <array>
@@ -22,6 +24,7 @@ LoadPlan prepare_image(std::span<const uint8_t> bytes,uint64_t new_base){
  p.mapped_base=new_base; p.mapped.resize(x.image_size);
  auto pe=get(bytes,0x3c,4),opt=pe+24,os=get(bytes,pe+20,2),hdr=get(bytes,opt+60,4),dirs=get(bytes,opt+108,4);
  auto dir=[&](unsigned i){if(i>=dirs||112ull+8ull*(i+1)>os)return std::pair<uint64_t,uint64_t>{0,0};auto a=get(bytes,opt+112+8ull*i,4),n=get(bytes,opt+116+8ull*i,4);if(a)bounds(a,n,x.image_size);return std::pair{a,n};};
+ p.header_bytes=static_cast<uint32_t>(hdr);
  std::copy_n(bytes.begin(),hdr,p.mapped.begin());
  std::vector<std::pair<uint64_t,uint64_t>> used{{0,hdr}};
  for(auto& s:x.sections){uint64_t a=s.rva,n=std::max(s.raw_size,s.virtual_size);if(!n)continue;bounds(a,n,x.image_size);for(auto [lo,hi]:used)if(a<hi&&lo<a+n)throw std::runtime_error("loader: overlapping sections");used.emplace_back(a,a+n);if(s.raw_size)std::copy_n(bytes.begin()+s.raw,s.raw_size,p.mapped.begin()+a);}
@@ -39,5 +42,34 @@ LoadPlan prepare_image(std::span<const uint8_t> bytes,uint64_t new_base){
  return p;
 }
 LoadPlan prepare_file(const std::filesystem::path& path,uint64_t base){std::ifstream f(path,std::ios::binary|std::ios::ate);if(!f)throw std::runtime_error("cannot open executable");auto n=f.tellg();if(n<0||n>std::streamoff(max_image))throw std::runtime_error("file too large (512 MiB limit)");std::vector<uint8_t>b(static_cast<size_t>(n));f.seekg(0);if(!f.read(reinterpret_cast<char*>(b.data()),n))throw std::runtime_error("read failed");return prepare_image(b,base);}
+std::vector<PageSpan> page_layout(const LoadPlan& p){
+ constexpr uint32_t page=4096;
+ if(!p.image.image_size||p.image.image_size!=p.mapped.size()||p.mapped.size()>max_image)throw std::runtime_error("layout: invalid prepared image size");
+ std::vector<uint8_t> flags((uint64_t(p.image.image_size)+page-1)/page);
+ auto mark=[&](uint64_t r,uint64_t n,uint8_t f){bounds(r,n,p.image.image_size);if(!n)return;for(auto i=r/page;i<=(r+n-1)/page;++i)flags[i]|=f|8;};
+ mark(0,p.header_bytes,1);
+ for(const auto& s:p.image.sections){uint8_t f=0;if(s.characteristics&0x40000000u)f|=1;if(s.characteristics&0x80000000u)f|=2;if(s.characteristics&0x20000000u)f|=4;mark(s.rva,std::max(s.raw_size,s.virtual_size),f);}
+ std::vector<PageSpan> out;
+ for(size_t i=0;i<flags.size();++i){auto start=static_cast<uint32_t>(i*page);auto n=std::min(page,p.image.image_size-start);if(!out.empty()&&out.back().flags==flags[i])out.back().bytes+=n;else out.push_back({start,n,flags[i]});}return out;
+}
+std::string layout_report(const LoadPlan& p){
+ auto spans=page_layout(p);std::ostringstream o;uint64_t wx=0,gaps=0;bool entry_x=false,entry_w=false;size_t nonw_iat=0;
+ o<<"Offline PE64 page layout (4 KiB model; no OS mappings or protection changes).\n";
+ for(const auto& r:spans){auto f=r.flags;uint64_t end=uint64_t(r.rva)+r.bytes;bool w=(f&2)!=0,x=(f&4)!=0;if(w&&x)wx+=r.bytes;if(!(f&8))gaps+=r.bytes;if(p.image.entry>=r.rva&&p.image.entry<end){entry_x=x;entry_w=w;}
+  o<<"RVA 0x"<<std::hex<<r.rva<<"..0x"<<end<<std::dec<<" | "<<((f&1)?'R':'-')<<(w?'W':'-')<<(x?'X':'-')<<" | "<<r.bytes<<" bytes"<<((f&8)?"":" (gap)")<<"\n";
+ }
+ for(const auto& slot:p.slots){auto i=std::upper_bound(spans.begin(),spans.end(),slot.rva,[](uint32_t r,const PageSpan& s){return r<s.rva;});if(i==spans.begin()){++nonw_iat;continue;}--i;if(!(i->flags&2)||uint64_t(slot.rva)+8>uint64_t(i->rva)+i->bytes)++nonw_iat;}
+ o<<"Writable+executable bytes: "<<wx<<"; unmapped gap bytes: "<<gaps<<"\n";
+ o<<"Entry RVA: 0x"<<std::hex<<p.image.entry<<std::dec<<"; executable page: "<<entry_x<<"; writable page: "<<entry_w<<"\n";
+ o<<"IAT slots outside writable spans: "<<nonw_iat<<" / "<<p.slots.size()<<" (diagnostic, not a compatibility verdict)\n";
+ o<<"DIR64 relocations: "<<p.relocations<<"; TLS callbacks: "<<p.tls_callbacks<<"; unwind entries: "<<p.unwind_entries<<"\nNo imports bound, TLS invoked, unwind registered or target code executed.\n";return o.str();
+}
+std::string import_plan_report(const LoadPlan& p){
+ std::ostringstream o;size_t candidates=0,blocked=0,own=0;std::unordered_set<uint32_t> slots;
+ o<<"Offline import plan: no modules loaded, no addresses bound.\n";
+ for(const auto& slot:p.slots){if(!slots.insert(slot.rva).second)throw std::runtime_error("duplicate import slot RVA");if(slot.dll=="revenge_abi.dll"&&(slot.symbol=="rv_abi_version"||slot.symbol=="rv_open"||slot.symbol=="rv_dispatch"||slot.symbol=="rv_close"||slot.symbol=="rv_status_name")){++own;o<<"IAT 0x"<<std::hex<<slot.rva<<std::dec<<" | "<<slot.dll<<"!"<<slot.symbol<<" | Revenge ABI declaration | ordinary OS loader; not bound by inspector\n";continue;}auto kind=classify_dependency(slot.dll);bool eligible=kind==DependencyKind::system_candidate||(kind==DependencyKind::api_contract&&auditable_contract(slot.dll));if(eligible)++candidates;else ++blocked;o<<"IAT 0x"<<std::hex<<slot.rva<<std::dec<<" | "<<slot.dll<<"!"<<slot.symbol<<" | "<<dependency_label(kind)<<" | "<<(eligible?"host audit candidate":"unsupported or unverified")<<'\n';}
+ o<<"Direct IAT slots: "<<p.slots.size()<<"; host audit candidates: "<<candidates<<"; unsupported/unverified: "<<blocked<<"; bound: 0\n";if(own)o<<"Revenge ABI declarations (not export-verified): "<<own<<"\n";
+ o<<"Delay imports present: "<<p.delay_imports<<"; TLS callbacks not executed: "<<p.tls_callbacks<<"; validated relocations: "<<p.relocations<<"\nNo Xbox ABI dispatch or executable launch.\n";return o.str();
+}
 std::string preparation_report(const LoadPlan& p,const std::filesystem::path& exe){std::ostringstream o;o<<"Revenge Native - offline loader preparation\n"<<"Image bytes: "<<p.mapped.size()<<"\nPreferred base: 0x"<<std::hex<<p.image.base<<"\nPrepared base: 0x"<<p.mapped_base<<"\nEntry VA: 0x"<<p.mapped_base+p.image.entry<<std::dec<<"\nDIR64 relocations: "<<p.relocations<<"\nIAT slots (unbound): "<<p.slots.size()<<"\nTLS template bytes: "<<p.tls_bytes<<"\nTLS zero fill bytes: "<<p.tls_zero_fill<<"\nTLS callbacks (not invoked): "<<p.tls_callbacks<<"\nUnwind entries (not registered): "<<p.unwind_entries<<"\nDelay imports present: "<<p.delay_imports<<"\nLoad config present: "<<p.load_config<<"\nXbox markers: "<<has_console_markers(p.image,exe)<<"\n\nDirect DLL inventory (presence is not ABI compatibility):\n";for(auto& d:p.image.imports){o<<"  "<<d.dll<<" - "<<d.symbols.size()<<" imports\n";}o<<"\nSTOP: no executable memory allocated, no imports bound, no TLS or entry point invoked. Console ABI and graphics translation are not implemented.\n";return o.str();}
 }

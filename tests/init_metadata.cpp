@@ -1,0 +1,8 @@
+#include "revenge/loader.hpp"
+#include <iostream>
+#include <stdexcept>
+#include <string>
+using namespace revenge;
+void put(LoadPlan& p,size_t at,uint64_t v,unsigned n){for(unsigned i=0;i<n;++i)p.mapped.at(at+i)=uint8_t(v>>(8*i));}
+void check(bool v){if(!v)throw std::runtime_error("init metadata test");}
+int main(){try{LoadPlan p;p.image.image_size=0x4000;p.image.base=p.mapped_base=0x140000000ull;p.header_bytes=0x200;p.mapped.resize(0x4000);p.image.sections={{"text",0x1000,0x1000,0,0,0x60000000},{"data",0x2000,0x1000,0,0,0xc0000000},{"rdata",0x3000,0x1000,0,0,0x40000000}};put(p,0x3c,0x80,4);put(p,0x94,240,2);size_t opt=0x98;put(p,opt+108,16,4);put(p,opt+112+9*8,0x3000,4);put(p,opt+116+9*8,40,4);put(p,opt+112+3*8,0x3080,4);put(p,opt+116+3*8,24,4);put(p,0x3010,p.mapped_base+0x2000,8);put(p,0x3018,p.mapped_base+0x3040,8);put(p,0x3040,p.mapped_base+0x1010,8);put(p,0x3048,p.mapped_base+0x2010,8);put(p,0x3080,0x1010,4);put(p,0x3084,0x1020,4);put(p,0x3088,0x3100,4);put(p,0x308c,0x1020,4);put(p,0x3090,0x1030,4);put(p,0x3094,0x3110,4);put(p,0x3100,1,1);put(p,0x3110,9,1);put(p,0x3114,0x1010,4);auto s=init_metadata_report(p);check(s.find("writable index: 1; callback targets outside executable pages: 1")!=std::string::npos);check(s.find("v1=2; v2=0; other=0; handlers=1")!=std::string::npos);check(s.find("suspicious header/tail records: 0")!=std::string::npos);put(p,0x3114,0x2000,4);check(init_metadata_report(p).find("suspicious header/tail records: 1")!=std::string::npos);std::cout<<"Initialisation metadata: TLS permissions, unwind headers, handler target and suspicious-record diagnostics passed.\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

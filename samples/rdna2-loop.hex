@@ -1,0 +1,7 @@
+# s1=0; loop: v0+=1; s1+=1; compare s1<=s0; branch to loop; end
+be810380
+4a000081
+80018101
+bf0b0001
+bf85fffc
+bf810000

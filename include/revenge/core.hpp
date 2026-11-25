@@ -5,8 +5,8 @@
 #include <string>
 #include <vector>
 namespace revenge {
-struct Import {std::string dll; std::vector<std::string> symbols;};
-struct Section {std::string name; uint32_t rva, virtual_size, raw, raw_size;};
+struct Import {std::string dll; std::vector<std::string> symbols; std::vector<bool> by_ordinal;};
+struct Section {std::string name; uint32_t rva, virtual_size, raw, raw_size; uint32_t characteristics{};};
 struct Image {uint16_t machine, subsystem; uint32_t entry, image_size; uint64_t base; bool tls, unwind, reloc; std::vector<Section> sections; std::vector<Import> imports;};
 Image inspect(std::span<const uint8_t> bytes);
 Image inspect_file(const std::filesystem::path& path);

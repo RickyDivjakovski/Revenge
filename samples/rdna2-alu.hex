@@ -1,0 +1,6 @@
+# Self-authored GFX10.3 integer ALU fixture; input v0, output v0.
+be800381 # s_mov_b32 s0, 1
+4a020100 # v_add_nc_u32 v1, v0, v0
+4a000300 # v_add_nc_u32 v0, v0, v1
+4a000000 # v_add_nc_u32 v0, s0, v0
+bf810000 # s_endpgm

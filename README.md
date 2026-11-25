@@ -6,7 +6,7 @@
 
 **Native execution. Hardware-adaptive graphics. Performance first.**
 
-![Version](https://img.shields.io/badge/version-0.6.0-1E90FF?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-0.47.0-1E90FF?style=for-the-badge)
 ![Language](https://img.shields.io/badge/C%2B%2B-20-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)
 ![Platform](https://img.shields.io/badge/target-Windows%20x64-0078D4?style=for-the-badge)
 ![Graphics](https://img.shields.io/badge/graphics-DirectX%2012-555555?style=for-the-badge)
@@ -17,372 +17,175 @@
 ![AMD](https://img.shields.io/badge/AMD-Radeon-ED1C24?style=flat-square)
 ![Intel](https://img.shields.io/badge/Intel-Arc-0071C5?style=flat-square)
 
-[Overview](#overview) · [Development progress](#development-progress) · [Roadmap](#roadmap) · [Build](#building-revenge) · [Usage](#using-revenge) · [Contributing](#contributing) · [Legal](LEGAL.md) · [Licence](LICENSE)
+[Overview](#overview) · [Development progress](#development-progress) · [Roadmap](#roadmap) · [Changelog](CHANGELOG.md) · [Build](#building-revenge) · [Usage](#using-revenge) · [Contributing](#contributing) · [Legal](LEGAL.md) · [Licence](LICENSE)
 
 </div>
 
 > [!IMPORTANT]
-> **Revenge Native is currently a research and development project, not a playable Xbox Series X|S emulator.** Version 0.6.0 can inspect and prepare console executables offline, but cannot execute Xbox game code. The graphics ABI translator and native shader recompiler are still under development. No commercial game has been demonstrated to run in this version.
+> Revenge Native is an independent research project, not a playable Xbox Series X|S emulator. General console executable loading, Xbox platform APIs and console graphics translation are not implemented.
 
 ## Overview
 
-Revenge is an independent C++20 compatibility-layer project designed to investigate running native Xbox Series X|S (Scarlett) games on Windows PCs by executing compatible x86-64 code directly and translating console-specific graphics, memory and operating-system interfaces.
+Revenge Native investigates native x86-64 execution and translation of Xbox Series X|S platform interfaces on Windows using an independent C++20 codebase. It aims to use existing PC hardware wherever appropriate rather than emulate every component of a console.
 
-Rather than emulating every component of an Xbox console, the goal is to use existing PC hardware and Windows APIs wherever their behaviour is compatible, while implementing the missing console functionality separately. Xbox Series consoles and modern Windows PCs share an x86-64 CPU architecture, but differ in their graphics interfaces, GPU shader formats, memory architecture and platform services.
-
-Revenge began as an experiment with existing compatibility-layer approaches. The current **Revenge Native** branch is an independent rewrite, with its own C++ codebase, executable preparation tools, graphics experiments and validation tests. It does not include the earlier Rust fork's implementations and does not yet match their feature set.
-
-### Project goals
-
-- Preserve original game logic through native x86-64 execution wherever possible.
-- Translate Xbox-specific Direct3D 12.X interfaces to desktop Direct3D 12.
-- Recompile console-native RDNA2 shaders to PC-compatible shader code.
-- Support NVIDIA, AMD and Intel graphics through runtime capability detection, without requiring separate vendor builds.
-- Reduce CPU/GPU stalls, redundant memory transfers and shader compilation overhead.
-- Build a persistent shader and pipeline cache with ahead-of-time preparation.
-- Provide a straightforward Windows launcher and detailed diagnostics.
-- Expand compatibility using repeatable tests, not title-specific shortcuts alone.
-
-The initial performance goal is **10 FPS (100 ms per frame)** in supported games. The longer-term ambition is stable 30–60 FPS where hardware and compatibility permit. These are engineering targets, not measured results or guarantees for every game.
+The project targets desktop Direct3D 12, vendor-adaptive GPU detection and RDNA2 shader recompilation. The initial gameplay performance goal is 10 FPS for supported console development applications; this is not a measured Xbox gameplay result.
 
 ## Development progress
 
-### Current release: v0.6.0
+### Current release: v0.47.0
 
 The following diagram shows the state of the main components, rather than an arbitrary percentage of the entire project.
 
 ```mermaid
 flowchart TD
-    A[PE32+ inspection] --> B[Offline image preparation]
-    B --> C[Native execution and Xbox ABI]
-    C --> D[Console memory and platform services]
-    C --> E[D3D12.X graphics translation]
-    F[Shader container inventory] --> G[RDNA2 shader recompilation]
-    H[PC HLSL AOT tool] --> G
-    I[GPU detection and transfer benchmarks] --> E
-    J[Dirty-page range batching] --> D
-    G --> E
-    D --> K[Playable development titles]
-    E --> K
-    K --> L[Game compatibility and FPS optimisation]
-    classDef tested fill:#166534,stroke:#22c55e,color:#ffffff;
-    classDef pending fill:#854d0e,stroke:#eab308,color:#ffffff;
-    classDef planned fill:#334155,stroke:#64748b,color:#ffffff;
-    class A,B,F,J tested;
-    class H,I pending;
-    class C,D,E,G,K,L planned;
+    A[PE64 inspection and offline preparation]:::tested --> B[Fixed native execution and unwind]:::tested
+    A --> C[Dependency and TLS metadata]:::tested
+    B -.-> D[General console loader]:::planned
+    C -.-> D
+    E[Restricted RDNA2 translation]:::partial --> F[Desktop D3D12 backend]:::tested
+    G[Compressed textures and mip filtering]:::tested --> F
+    F --> H[Multipass MRT and composition fixture]:::pending
+    D -.-> I[Xbox system APIs]:::planned
+    D -.-> J[Xbox graphics translation]:::planned
+    I -.-> K[Actual Xbox gameplay]:::planned
+    J -.-> K
+    classDef tested fill:#166534,stroke:#4ade80,color:#fff
+    classDef pending fill:#854d0e,stroke:#facc15,color:#fff
+    classDef partial fill:#854d0e,stroke:#facc15,color:#fff
+    classDef planned fill:#374151,stroke:#9ca3af,color:#fff
 ```
 
-🟢 **Implemented and tested** · 🟡 **Implemented, Windows/GPU validation pending** · ⚪ **Planned / incomplete**
+🟢 **Implemented and tested (within stated scope)** · 🟡 **Partial or Windows/GPU validation pending** · ⚪ **Planned / incomplete**
 
-| Subsystem | Progress | Current implementation |
-| --- | :---: | --- |
-| PE32+ executable inspection | 🟢 Tested | Headers, sections, named/ordinal imports and bounds checks |
-| Offline image preparation | 🟢 Tested | Section mapping into data buffers, zero filling and AMD64 DIR64 relocations |
-| Loader metadata | 🟢 Tested | Direct IAT slot inventory, basic TLS and exception-table validation |
+| **Subsystem** | **Progress** | **Current implementation** |
+| --- | --- | --- |
+| PE32+ executable inspection | 🟢 Tested | Headers, sections, imports, exports, delay imports and bounds checks |
+| Offline image preparation | 🟢 Tested | Data-buffer mapping, zero fill, DIR64 relocations and page permissions |
+| Loader metadata | 🟢 Tested | Recursive direct-import inventory, TLS templates and x64 unwind diagnostics; no general binding |
+| Fixed native image execution | 🟢 Tested | Independently authored x64 fixture, fixed host import, Windows unwind registration and stack recovery |
 | Dirty-page tracking | 🟢 Tested | Dirty bitmap and contiguous range coalescing |
 | Shader inventory | 🟢 Tested | Structural DXBC discovery and SHA-256 deduplication |
-| Windows folder picker | 🟡 Pending validation | Executable selection and offline preparation reports |
-| GPU capability detection | 🟡 Pending validation | DXGI adapter selection, vendor, UMA, memory and feature reporting |
-| GPU synchronisation | 🟡 Pending validation | Standalone fence-based submission ring and verified-readback benchmark design |
-| PC shader precompilation | 🟡 Pending validation | Parallel HLSL-to-DXIL compilation and persistent integrity-checked cache |
-| Compute shader harness | 🟡 Pending validation | Known-answer Direct3D 12 compute test |
-| Native Xbox execution | ⚪ Pending | Import binding, TLS startup, unwind registration and console ABI |
-| Xbox memory and system APIs | ⚪ Pending | Physical memory semantics, resource ownership and platform services |
-| D3D12.X graphics translation | ⚪ Pending | Device, resources, descriptors, command lists, queues and presentation |
-| Native shader recompilation | ⚪ Pending | RDNA2 decoding, intermediate representation, DXIL emission and validation |
-| Texture layout and ray tracing | ⚪ Pending | Console tiling conversion and compatible PC acceleration structures |
-| Audio, input, storage and lifecycle | ⚪ Pending | Windows-backed platform adapters |
-| Runtime pipeline cache | ⚪ Planned | Adapter/driver-specific PSO persistence |
-| Playable games and FPS | ⚪ Not demonstrated | First-frame and gameplay milestones remain outstanding |
+| Windows folder picker | 🟡 Partial | Executable selection and offline reports; interactive validation not established here |
+| GPU capability detection | 🟢 Tested | Hardware detection and capability reporting on RTX 5070 Ti; AMD/Intel hardware validation outstanding |
+| GPU synchronisation | 🟢 Tested | Fence-based submission, resource reuse and verified readback |
+| PC shader precompilation | 🟡 Partial | Restricted HLSL translation and cache tooling; full DXIL pipeline not validated |
+| Compute shader harness | 🟢 Tested | Known-answer independent Direct3D 12 compute fixtures |
+| Native Xbox execution | ⚪ Pending | General import binding, guest TLS, exception environment and console ABI |
+| Xbox memory and system APIs | ⚪ Pending | Console memory semantics, ownership and platform services |
+| D3D12.X graphics translation | ⚪ Pending | Console-specific device, resources, commands and presentation |
+| Native shader recompilation | 🟡 Partial | Restricted RDNA2 ALU, flow, memory and stage fixtures; not general console shaders |
+| Texture layout and filtering | 🟢 Tested | Independent layout reference and D3D12 RGBA8/BC1/3/4/5 sampling, mips and arrays; not console tiling |
+| Multipass render targets | 🟡 Pending GPU validation | Two MRTs, depth/stencil, blending, scissor and render-to-texture fixture |
+| Ray tracing | ⚪ Pending | Console acceleration structures and shader translation; hardware capability detection only |
+| Audio, input, storage and lifecycle | 🟡 Partial | Independent Windows-backed adapters; physical audio/controller checks incomplete |
+| Runtime pipeline cache | 🟡 Partial | Restricted fixture pipeline reuse and compute cache; general persistent graphics cache incomplete |
+| Independent game | 🟢 Tested | Revenge Arena desktop sample, not an Xbox title |
+| Playable Xbox games and FPS | ⚪ Not demonstrated | Authorised console first frame and gameplay milestones remain outstanding |
 
 ### What has been achieved
 
-The current native codebase has passed a Linux C++20 Release build, its CTest suite and two Python shader tests. The portable tests exercise executable preparation using synthetic fixtures, including base relocations, IAT metadata and bounds validation.
+The current C++20 codebase passes 65 portable CTest tests and two Python tests. The last full Windows suite passed 83/83 tests on v0.45.0; the v0.46.0 focused Windows run passed all three selected tests and 320 desktop GPU texture comparisons. The new render-pass reference checks 768 pixels across three surfaces. The v0.47.0 Windows GPU render-pass test is pending.
 
-These results demonstrate executable **preparation**, not execution. The mapped image is a non-executable data buffer; no imports are bound and no callbacks or title entry point are invoked. Title-specific diagnostic data is not distributed in this public snapshot.
+These results demonstrate independent executable preparation, fixed native execution, host runtime services and desktop graphics. They do **not** demonstrate execution of an Xbox title or a complete console compatibility layer. No title-specific or protected material is distributed.
 
-See [validation results](docs/VALIDATION.md) for details. Windows MSVC compilation, DXC integration and GPU execution have not yet been validated for this release.
+See [validation results](docs/VALIDATION.md) and [release history](CHANGELOG.md) for details.
 
 ## Architecture
 
 ```mermaid
 flowchart LR
-    A[Authorised loose executable] --> B[Inspect and prepare PE image]
-    B -. planned .-> C[Native x64 runtime]
-    C -. planned .-> D[Xbox API compatibility]
-    C -. planned .-> E[D3D12.X translator]
-    F[Console shader data] -. planned .-> G[RDNA2 decoder and IR]
-    G -. planned .-> H[DXIL compiler and cache]
-    H -. planned .-> E
-    D -. planned .-> I[Windows services]
-    E -. planned .-> J[Desktop Direct3D 12]
-    J --> K[NVIDIA / AMD / Intel]
-    classDef active fill:#1d4ed8,stroke:#60a5fa,color:#ffffff;
-    classDef future fill:#334155,stroke:#94a3b8,color:#ffffff;
-    class B active;
-    class C,D,E,G,H,I future;
+    A[Authorised development executable] --> B[Offline PE inspection]
+    B -.-> C[General console execution environment]
+    C -.-> D[Xbox platform services]
+    C -.-> E[Console graphics translation]
+    F[Independent shader fixtures] --> G[Restricted shader translation]
+    G --> H[Desktop Direct3D 12]
+    E -.-> H
+    M[Independent game and native ABI] --> H
+    H --> I[PC GPU]
+    H --> T[Texture and multipass fixtures]
+    D -.-> W[Windows platform adapters]
 ```
 
-The diagram represents the intended full runtime. Dashed connections are future integration work; the current build contains standalone PC graphics and shader tools, not a functioning console-to-PC rendering pipeline.
-
-### Performance strategy
-
-The main areas of research are reducing unnecessary synchronisation, avoiding redundant CPU-to-GPU uploads, parallelising independent shader compilation, reusing translated shaders and pipelines, and exploiting actual adapter capabilities instead of assuming a fixed GPU vendor or memory architecture.
-
-The initial frame-time budget is:
-
-| Subsystem | Proposed budget | Allocation |
-| --- | ---: | --- |
-| CPU translation and submission | 30 ms | `██████░░░░░░░░░░░░░░` |
-| Memory and transfer management | 15 ms | `███░░░░░░░░░░░░░░░░░` |
-| GPU rendering | 45 ms | `█████████░░░░░░░░░░░` |
-| Other overhead | 10 ms | `██░░░░░░░░░░░░░░░░░░` |
-| **Total** | **100 ms** | **10 FPS target** |
-
-These are planning allocations, not benchmark measurements. CPU/GPU overlap means the end-to-end critical path matters more than a simple sum. Performance will be assessed using actual presented frames, frame-time percentiles, shader cache hits, fence stalls, transfer volume and visual correctness.
+The diagram represents the intended full runtime. Solid connections describe existing independent research paths; dashed connections are future integration work. The desktop graphics backend is not a functioning console-to-PC rendering pipeline.
 
 ## Roadmap
 
-| Milestone | Goal | Status |
-| --- | --- | :---: |
-| M1 | Portable PE inspection and offline preparation | 🟢 Initial implementation tested |
-| M2 | Windows builds and hardware/compute validation | 🟡 Awaiting validation |
-| M3 | Execute a small authorised x64 development fixture | ⚪ Planned |
-| M4 | Console memory, threading, storage and ABI support | ⚪ Planned |
-| M5 | RDNA2 shader decoding and validated PC shader generation | ⚪ Planned |
-| M6 | D3D12.X graphics translation and first rendered triangle | ⚪ Planned |
-| M7 | Textures, descriptor lifetimes, ray tracing and presentation | ⚪ Planned |
-| M8 | Input, audio, save data and playable development titles | ⚪ Planned |
-| M9 | Per-title compatibility and shader/pipeline cache integration | ⚪ Planned |
-| M10 | Sustained 10 FPS target and cross-vendor performance tuning | ⚪ Planned |
+- General executable initialisation, guest TLS and exception environment.
+- Documented Xbox platform service and graphics interface compatibility.
+- Broader shader instruction, resource and command coverage.
+- Authorised console-targeted development application validation, followed by gameplay and performance testing.
 
-The next milestone is to validate the Windows graphics harness and establish a correct native execution path with a small, self-authored or otherwise authorised Xbox development fixture. Full commercial titles will be evaluated only after the underlying interfaces are validated.
+## Requirements
 
-## Hardware and software requirements
-
-These are **development requirements**, not a final game compatibility specification.
-
-| Component | Requirement |
+| Component | Development requirement |
 | --- | --- |
-| Operating system | Windows 10/11 x64 target; Windows validation pending |
-| CPU | x86-64 AMD or Intel processor |
-| GPU | Hardware Direct3D 12 adapter supporting feature level 12_0 for current GPU tools |
-| Graphics driver | Up-to-date compatible driver |
-| Compiler | Visual Studio 2022 with Desktop development with C++ (MSVC v143) |
+| OS and CPU | Windows 10/11 x64; AMD or Intel x86-64 |
+| GPU | Hardware Direct3D 12 adapter supporting feature level 12_0 |
+| Compiler | Visual Studio 2022, Desktop development with C++ |
 | Windows SDK | 10.0.22621 or newer recommended |
 | CMake | 3.20 or newer |
-| Python | 3.9+ (3.11+ recommended), for shader tools and Python tests |
-| DXC | Optional; required for HLSL-to-DXIL experiments |
+| Python | 3.9+ for shader tooling and tests |
+| DXC | Optional for offline shader experiments |
 
-The runtime is designed to use standard DXGI/D3D12 interfaces and automatically select a suitable adapter, reporting NVIDIA, AMD or Intel vendor information and relevant capabilities. Vendor compatibility is not yet verified on physical hardware. Linux is supported for portable core tests only; the GPU backend is a stub on non-Windows builds.
+Linux supports portable core tests, not the Windows GPU backend. NVIDIA, AMD and Intel adapters are detected through standard APIs; physical cross-vendor validation is incomplete.
 
 ## Building Revenge
 
-### 1. Install the prerequisites
-
-Install [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/downloads/) with **Desktop development with C++**, including the MSVC x64 toolchain and Windows SDK. Install [CMake](https://cmake.org/download/) as well. An existing Visual Studio installation with the same workload is sufficient.
-
-Alternatively, install CMake using PowerShell:
+Install [Visual Studio 2022 Build Tools](https://visualstudio.microsoft.com/downloads/) with the C++ desktop workload and [CMake](https://cmake.org/download/). Extract the source, open PowerShell in the project root and run:
 
 ```powershell
-winget install --id Kitware.CMake -e
+powershell -ExecutionPolicy Bypass -File .\Build-And-Test-Revenge.ps1
 ```
 
-Close and reopen PowerShell after installation. Verify CMake is available:
+This builds the Release configuration, runs automated regression and GPU fixture checks, and writes a `validation.log`. Add `-Play` to launch the independent Revenge Arena sample after validation. For a normal build, use `Build-Revenge.ps1` instead. Rust is not required.
 
-```powershell
-cmake --version
-```
+For faster development iterations, keep the existing `build` directory and use `-FastBuild -BuildJobs 2`. This disables interprocedural optimisation while keeping Release optimisation, and builds with two concurrent jobs. Use the same flags on subsequent runs to avoid rebuilding when switching optimisation modes. Reduce to `-BuildJobs 1` if memory pressure or compiler file-access errors occur. Omit `-FastBuild` for the standard optimised build.
 
-For shader experiments, install [Python](https://www.python.org/downloads/) and download the [DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler/releases). Keep `dxc.exe` and its accompanying DLLs together.
-
-### 2. Download the source
-
-Use **Code → Download ZIP** on GitHub, or clone the repository using its GitHub clone URL. Extract or open the project directory containing `CMakeLists.txt` and `Build-Revenge.ps1`.
-
-### 3. Compile for Windows x64
-
-Open PowerShell in the project directory:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\Build-Revenge.ps1
-```
-
-The script searches for CMake, configures the Visual Studio 2022 x64 generator, builds Release and runs the C++ tests. If CMake or the build toolchain is missing, install the corresponding component before retrying.
-
-The expected output is:
-
-```text
-build\Release\Revenge.exe
-```
-
-#### Manual CMake build
-
-```powershell
-cmake -S . -B build -G "Visual Studio 17 2022" -A x64
-cmake --build build --config Release --parallel
-ctest --test-dir build -C Release --output-on-failure
-```
-
-### 4. Verify the build
-
-```powershell
-.\build\Release\Revenge.exe --version
-.\build\Release\Revenge.exe --help
-```
-
-Rust is not required for Revenge Native.
+For focused development checks, add `-Focused` to the validation command. It builds only Revenge and the four relevant test executables, runs four CPU regression tests and the desktop GPU sampling and render-pass comparisons. It does not certify the full suite. Run the command without `-Focused` for complete validation. When updating from an exact previous release, the optional incremental source archive replaces only changed files, preserving other source timestamps and existing build outputs.
 
 ## Using Revenge
 
-### Windows folder selection
-
-Double-click `Revenge.exe`, or run:
-
 ```powershell
-.\build\Release\Revenge.exe browse
-```
-
-Select a directory containing an authorised loose executable. If multiple executables are present, choose the intended file.
-
-- A detected Scarlett executable is prepared offline and a report is written to `%TEMP%\Revenge-loader-report.txt`. No Xbox game code is executed.
-- An ordinary Windows executable without known console markers may be launched directly by Windows after confirmation. This is not Xbox emulation.
-- Detection is heuristic. Only select trusted files.
-
-### Inspect and prepare an executable
-
-```powershell
-.\build\Release\Revenge.exe inspect 'C:\Games\Test\game.exe'
-.\build\Release\Revenge.exe prepare 'C:\Games\Test\game.exe'
-.\build\Release\Revenge.exe prepare 'C:\Games\Test\game.exe' --rebase
-```
-
-`inspect` reports executable headers, sections and direct imports. `prepare` performs offline image preparation; `--rebase` tests relocation to an alternate virtual base without reserving that address in Windows. The current CLI accepts PE32+ files up to 512 MiB; use ASCII paths for CLI compatibility. Delay-loaded, dynamic and transitive imports are not included.
-
-### GPU detection and benchmarks
-
-```powershell
+.\build\Release\Revenge.exe --help
 .\build\Release\Revenge.exe gpu-info
-.\build\Release\Revenge.exe gpu-bench 240 1 4
-.\build\Release\Revenge.exe gpu-bench 240 3 4
-.\build\Release\Revenge.exe mem-bench
+.\build\Release\Revenge.exe inspect .\build\Release\RevengePlatformProbe.exe
+.\build\Release\Revenge.exe target-plan .\build\Release\RevengePlatformProbe.exe
 ```
 
-The GPU benchmark compares 240 iterations of 4 MiB transfers with one versus three submission slots and checks final readback. The memory benchmark measures synthetic dirty-range processing, not actual GPU transfer throughput. Neither command measures game FPS.
-
-### Shader research tools
-
-Discover structurally recognisable, uncompressed DXBC containers in an authorised directory:
-
-```powershell
-py -3 tools\shaders.py scan 'C:\Games\Test' --out shader-inventory.json
-```
-
-Compile the included HLSL sample ahead of time using parallel DXC workers and a dedicated fresh cache:
-
-```powershell
-py -3 tools\shaders.py compile samples\shaders.json --dxc 'C:\Tools\dxc\bin\x64\dxc.exe' --cache cache\sample-hlsl --jobs 6
-$shader = (Get-ChildItem .\cache\sample-hlsl\*.dxil | Select-Object -First 1).FullName
-.\build\Release\Revenge.exe gpu-compute $shader
-```
-
-Use a fresh sample cache and only the provided known-answer shader for `gpu-compute`. It expects a particular UAV layout and arithmetic. The compiler cache includes preprocessed source, compiler identity, entry point, target and optimisation settings; stored output hashes are checked before reuse.
-
-> [!NOTE]
-> PC HLSL compilation is not Xbox shader translation. The current scanner does not decode packed archives or native RDNA2 shader instructions, and the shader tool is not a runtime game pipeline cache. Real DXC and GPU integration remain untested.
+The diagnostic commands inspect executable metadata without executing the inspected file. The native Windows process runner uses the normal OS loader and is not an Xbox execution environment or security sandbox. Use only trusted, authorised development files.
 
 ## Project structure
 
 ```text
 Revenge/
-├── CMakeLists.txt            # C++20 build configuration
-├── Build-Revenge.ps1         # Windows build and test script
-├── include/revenge/         # Public core, loader and launcher interfaces
+├── CMakeLists.txt
+├── Build-Revenge.ps1
+├── Build-And-Test-Revenge.ps1
+├── include/revenge/
 ├── src/
-│   ├── main.cpp              # CLI and benchmark entry points
-│   ├── pe.cpp                # PE32+ inspection
-│   ├── loader.cpp            # Offline image preparation
-│   ├── pages.cpp             # Dirty-page range batching
-│   ├── launch.cpp            # Executable selection and console markers
-│   ├── launch_win.cpp        # Windows folder selection
-│   ├── gpu_win.cpp           # Direct3D 12 probes and benchmarks
-│   └── gpu_stub.cpp          # Non-Windows GPU stub
-├── tools/shaders.py         # Shader inventory and PC HLSL compiler
-├── samples/                 # Known-answer HLSL fixture
-├── tests/                   # C++ and Python tests
-├── docs/                    # Architecture and validation notes
-├── LICENSE                  # GNU GPL v3 licence text
-├── LEGAL.md                 # Development and distribution policy
-├── CONTRIBUTING.md          # Contribution and provenance rules
-├── THIRD_PARTY_NOTICES.md   # Dependency and reference register
-└── .gitignore               # Local files excluded from version control
+├── samples/
+├── tests/
+├── tools/
+├── docs/
+├── README.md
+├── CHANGELOG.md
+├── CONTRIBUTING.md
+├── LEGAL.md
+├── THIRD_PARTY_NOTICES.md
+└── LICENSE
 ```
-
-## Testing
-
-On Windows, the build script runs CTest. Run the Python suite separately:
-
-```powershell
-ctest --test-dir build -C Release --output-on-failure
-py -3 tests\test_shaders.py
-```
-
-On Linux, build the portable core and run its tests:
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --parallel
-ctest --test-dir build --output-on-failure
-python3 tests/test_shaders.py
-```
-
-The portable test suite covers PE import parsing, range validation, relocation fixups and rejection of unsupported relocations, IAT slot indexing, dirty-page tracking, executable candidate selection and shader-container inventory/deduplication. See [validation](docs/VALIDATION.md).
 
 ## Contributing
 
-Read [CONTRIBUTING.md](CONTRIBUTING.md) and [LEGAL.md](LEGAL.md) before submitting changes. Document source provenance and preserve all required notices.
+Read [CONTRIBUTING.md](CONTRIBUTING.md) and [LEGAL.md](LEGAL.md). Include the version, hardware, exact command, validation log and a minimal authorised fixture in reproducible bug reports. Do not submit commercial binaries, protected packages, private SDK material or credentials.
 
-Useful areas for future work include C++ systems programming, Windows PE/ABI research, Direct3D 12, GPU shader compilation, AMD RDNA2 ISA, memory management and performance profiling.
+## Documentation and licence
 
-For a reproducible bug report or performance contribution, include:
+- [Release history](CHANGELOG.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Validation](docs/VALIDATION.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+- [GPL-3.0-or-later licence](LICENSE)
 
-- Revenge version, operating system, CPU, GPU and driver version.
-- Exact command and error or unexpected result.
-- `gpu-info` output and relevant benchmark results.
-- A minimal, authorised test fixture and expected output, if available.
-- For performance changes, comparable before/after measurements and evidence that rendering correctness is preserved.
-
-Please do not submit copyrighted commercial game binaries, protected packages, private SDK material, credentials, or personal file paths in public issues. Small self-authored development samples with corresponding Windows and Scarlett builds are particularly valuable.
-
-## Research and references
-
-Revenge draws architectural research from public graphics and executable documentation, and studies other compatibility projects as references. These links do not imply shared code, affiliation or feature parity.
-
-- [Microsoft GDK](https://github.com/microsoft/GDK) and [Xbox GDK samples](https://github.com/microsoft/Xbox-GDK-Samples)
-- [Microsoft PE format specification](https://learn.microsoft.com/en-us/windows/win32/debug/pe-format)
-- [AMD GPU ISA specifications](https://gpuopen.com/machine-readable-isa/)
-- [Microsoft DirectX Shader Compiler](https://github.com/microsoft/DirectXShaderCompiler)
-- [DirectX specifications](https://github.com/microsoft/DirectX-Specs)
-- [Direct3D 12 fence-based resource management](https://learn.microsoft.com/en-us/windows/win32/direct3d12/fence-based-resource-management)
-- [Xenia](https://github.com/xenia-project/xenia), [shadPS4](https://github.com/shadps4-emu/shadPS4) and [vkd3d-proton](https://github.com/HansKristian-Work/vkd3d-proton) — architectural references for other platforms and graphics APIs
-
-Further technical details are available in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
-
-## Disclaimer and licensing
-
-Revenge is an independent research project and is not affiliated with Microsoft, Xbox, NVIDIA, AMD, Intel or any game publisher. Their names and trademarks belong to their respective owners. Revenge does not distribute game files, confidential SDK components, firmware or encryption keys. Use only software and development materials you are authorised to access. The project does not aim to bypass licensing or authentication systems.
-
-Original Revenge Native source is licensed under the **GNU General Public License, version 3 or (at your option) any later version (GPL-3.0-or-later)**. See [LICENSE](LICENSE) for the full licence. Third-party material remains subject to its applicable terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-The Native branch is an independent reimplementation, not a formally audited two-team clean-room project. Revenge does not accept DRM circumvention, protected retail-package decryption, console key extraction, hypervisor bypass or unauthorised authentication bypass contributions. See [LEGAL.md](LEGAL.md) for project boundaries and [CONTRIBUTING.md](CONTRIBUTING.md) for provenance and testing requirements.
-
-The policy and licence are not a guarantee of legal compliance. Contributors and distributors must verify their rights, applicable agreements and local law.
-
----
-
-<div align="center">
-
-**REVENGE — building toward native execution, accurate translation and measurable performance.**
-
-</div>
+Revenge is independent and not affiliated with Microsoft, Xbox or any hardware vendor or game publisher. Original source is licensed under GPL-3.0-or-later. The project does not distribute game files, confidential SDK components, firmware or encryption keys, and does not aim to bypass licensing or authentication. See [LEGAL.md](LEGAL.md) for the full policy.

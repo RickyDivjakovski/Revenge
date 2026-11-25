@@ -41,3 +41,75 @@ An authorised small Xbox GDKX development test binary and its source plus expect
 ## 0.6.0 loader preparation update
 
 The new offline `prepare_image` implementation maps file sections into a bounded zero-initialized data buffer, inventories direct IAT slot RVAs, parses AMD64 relocation blocks and applies DIR64 fixups to the buffer. It validates basic TLS template/callback address ranges and runtime-function entry bounds. It is not an executable memory mapper. It neither calls nor binds title code. It rejects unsupported relocation types and overlapping mapped sections. Full loader semantics, including thread startup/TLS, exception handling, host API ABI verification, section protections, package requirements and delay/dynamic imports remain pending. See Microsoft's PE format documentation linked above. Windows testing and game-specific validation require authorised development fixtures.
+
+## 0.7.0 native Windows runtime
+
+The new Windows runner is a controlled baseline for self-authored PE fixtures, not an Xbox ABI implementation. The native OS loader performs import resolution, TLS startup, unwind registration, and section protection. The runner creates a suspended child, assigns it to a kill-on-close job, then resumes it. It does not map executable code into Revenge's process. An optional debugger loop logs second-chance exception addresses and passes exceptions to normal OS handling. Diagnostic mode adds overhead and is not a benchmark mode. A timeout terminates the job; this is process lifetime supervision, not a security sandbox.
+
+Direct import audit uses a narrow allowlist of system-directory DLL candidates and reports unresolved/unchecked symbols; API-set contracts are left to the native OS loader. No title DLLs are loaded by the audit. Known console markers are rejected by the runner. The offline PE preparation path is unchanged. Full Xbox import binding, console TLS semantics, platform API adapters and shader translation are outstanding.
+
+References: [AssignProcessToJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject), [Windows job objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects), [Debugger exception handling](https://learn.microsoft.com/en-us/windows/win32/debug/debugger-exception-handling).
+
+## 0.8.0 system primitives and tuning
+
+`MemoryArena` is a bounded CPU-only page model (maximum 256 MiB of physical backing). Physical indices can be mapped into multiple virtual page ranges, including scatter order; mapped pages cannot be freed. Reads/writes validate every touched mapping first. Physical dirty ranges are collected explicitly; allocation and free zero pages. External synchronization is required, and snapshot/reset must occur only when no concurrent writes can be lost. Page indices are not capability handles and cannot be used as guest addresses. This is not an `xmem.dll` replacement. GPU ownership and native virtual mappings remain unimplemented.
+
+The API registry records unimplemented console dependencies without providing fake exports. The path tool uses synthetic G/T/U/D mappings and rejects traversal, device names and unsupported characters. It performs no actual file IO and is not a sandbox. The Windows audit now attempts a fixed list of common API-set contracts using the system-directory loader, preserving unchecked status for unavailable contracts. The execution gate is unchanged.
+
+The transfer tuner compares medians for several ring sizes subject to a conservative DXGI local-budget estimate, keeps fence waits before allocator reuse and recommends the smallest size within 95% of the peak. It is a standalone experiment, not adaptive scheduling integrated into a game. The CPU capability probe reports vendor and OS-enabled AVX2 availability without selecting a different instruction path. Optional Agility SDK integration uses an externally obtained matching runtime and documented executable exports. Windows SDK headers remain the compile-time interfaces.
+
+Public references: [API sets](https://learn.microsoft.com/en-us/windows/win32/apiindex/windows-81-api-sets), [LoadLibraryExW](https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-loadlibraryexw), [DXGI memory budgets](https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_4/ns-dxgi1_4-dxgi_query_video_memory_info), [fence resource reuse](https://learn.microsoft.com/en-us/windows/win32/direct3d12/fence-based-resource-management), [Agility SDK setup](https://devblogs.microsoft.com/directx/gettingstarted-dx12agility/).
+
+## 0.9.0 desktop graphics fixture
+
+`graphics.hpp` and `graphics.cpp` contain the portable frame ring, sample timing summary and BMP export. `gpu_win.cpp` implements an independent D3D12 render harness with a shader-visible SRV heap, RTV heap, per-slot render targets and command allocators, an immutable uploaded texture and one graphics PSO. Every reuse is gated by a monotonically increasing queue fence. Timestamp queries are resolved to a dedicated readback buffer, and the last render target is transitioned to copy-source for pixel validation. The fixture deliberately uses a desktop shader model 5.1 shader and no console-specific calls.
+
+Not yet implemented: presentation, general resource lifetime/descriptor allocation, a dedicated asynchronous transfer queue, adaptive rendering-ring selection, persistent PSO disk caching, console texture swizzling and Xbox graphics ABI translation. The current fixture does not add game execution.
+
+## 0.10.0 ALU shader fixture compiler
+
+The earlier shader plan now has a tested limited GFX10.3 integer decoder, CPU evaluator, optimizer and HLSL emitter. This is a standalone self-authored fixture ABI (v0 input/output, independent active lanes), not a complete Xbox shader ABI. Existing DXC precompile tooling can optionally compile the generated fixture. The system D3DCompile compute verification command requires Windows GPU testing. See [SHADER_IR.md](SHADER_IR.md) for scope, public references and limits. Console execution, complete native shader translation, wave semantics, resource bindings, pipeline disk caching and graphics translation remain pending.
+
+## 0.11.0 forward control flow and FP32 fixtures
+
+A separate bounded decoder builds an acyclic CFG, checks literal boundaries and intersects incoming definite-assignment sets in topological order. Scalar SCC comparisons and forward branches are lowered to guarded HLSL statements in instruction order; this avoids an unbounded dispatch loop but is not general structured control-flow reconstruction. The generated fixture assumes all lanes active and scalar group input. The reference CPU wave mask abstraction does not feed into GPU code generation. Normal FP32 arithmetic uses bit-preserving casts and precise HLSL operations; denormals, NaNs, infinities, signed zero, rounding controls and divergent masks are not validated. See `SHADER_FLOW.md`.
+
+## 0.12.0 buffer resource fixture
+
+The separate `memory_shader` decoder validates a small GFX10 MUBUF subset, `s_waitcnt vmcnt(0)` and no-carry integer addition. A fixed research ABI maps s[0:3] to a read-only structured buffer and s[4:7] to a distinct writable structured buffer; v0 is an immutable index. Load destinations stay unavailable until a full wait. The emitted HLSL has explicit bounds checks; the GPU harness binds t0 using an upload heap and u0 using a separate UAV, then reads back after a fence. This is not a generic descriptor decoder, guest memory model, or a console graphics API adapter. See [SHADER_MEMORY.md](SHADER_MEMORY.md).
+
+## 0.13.0 mixed fixture and compute cache
+
+The flow decoder accepts an opt-in bounded MUBUF resource mode in the same CFG as integer and FP32 operations. The compute harness optionally persists driver PSO blobs keyed by exact compiled shader and root signature and adapter identity. See [SHADER_UNIFIED.md](SHADER_UNIFIED.md).
+
+## 0.14.0 texture layout and graphics PSO cache
+
+See [TEXTURE.md](TEXTURE.md) for the typed texture model, independent Morton8 layout, GPU conversion fixture and fixed graphics cache schema. Actual console tiling, texture instructions and descriptor ABI remain pending.
+
+## 0.15.0 native virtual memory
+
+See [VIRTUAL_MEMORY.md](VIRTUAL_MEMORY.md). A separate host arena uses native reserve/commit/protect/decommit operations and generation-checked suballocations, with a logical retirement timeline. The existing page alias model is unchanged. No guest pointer ABI or GPU integration.
+
+## 0.16.0 resource transfer foundation
+
+The independent transfer pool tracks fixed buffer triplets, recording order and fence-gated reuse. The new Windows fixture uses the native VM arena as CPU staging and a dedicated copy queue for upload and readback. Every submitted payload is verified. See [TRANSFERS.md](TRANSFERS.md) for the exact scope and limitations.
+
+## 0.17.0 desktop presentation foundation
+
+`presentation::BackBuffers` is a portable state validator for actual swap-chain indices and completed fence values. The Windows fixture uses a dedicated direct queue, three flip-discard buffers, indexed RTVs and command allocators, root constants for animated geometry and timestamp readback per slot. Resize is drain-before-release; minimized windows skip drawing. See [PRESENTATION.md](PRESENTATION.md) for limitations and measurement definitions. Existing copy/compute/offscreen paths remain independent.
+
+## 0.18.0 scene command foundation
+
+The portable `scene3d` command validator drives a fixed Windows indexed scene: geometry/texture binding, perspective vertex projection, depth testing, texture sampling and fenced color readback. See [SCENE.md](SCENE.md). This is not a unified console command processor; presentation remains a separate fixture.
+
+## 0.19.0 integrated fixture
+
+See [integration](INTEGRATION.md) for the generated compute palette, direct queue fence handoff, descriptor registry and frame pacing. The scene remains an independent offscreen fixture and is not a console API implementation.
+
+## 0.20.0 application dispatcher
+
+The linked C++ application fixture calls a typed request/reply dispatcher for lifecycle, native host memory, event synchronization, monotonic time and bounded temporary storage. A synchronous render callback invokes the existing integrated graphics fixture. See [application design](APPLICATION.md) for the API contract and limitations. No guest ABI or binary loader is provided.
+
+## 0.21.0 multimedia and snapshot services
+
+The application dispatcher adds `Persist`/`Restore` for a host-selected single snapshot. PCM mixing and controller normalization are portable; XAudio2 playback and XInput polling are standalone Windows hardware fixtures. See [MULTIMEDIA.md](MULTIMEDIA.md). No console ABI or unified multimedia guest execution.

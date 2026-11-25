@@ -84,3 +84,28 @@ revenge.local.toml
 .DS_Store
 Thumbs.db
 desktop.ini
+
+# Local render fixture output
+revenge-frame*.bmp
+revenge-graphics-test.bmp
+
+# Generated local shader fixture
+/samples/rdna2-generated.hlsl
+
+/samples/rdna2-flow-generated.hlsl
+
+/samples/rdna2-buffer-generated.hlsl
+
+/samples/rdna2-unified-generated.hlsl
+
+# Integrated fixture output
+integrated-*.bmp
+scene-*.bmp
+
+# Local independent shader package outputs
+*.rsp
+package-*.bmp
+
+# Local combined validation runs and game saves
+/validation-*/
+/arena-save.rvs
