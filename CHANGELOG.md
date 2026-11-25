@@ -2,6 +2,78 @@
 
 Historical release notes, newest first. Historical test counts and planned features describe their respective releases; see [README.md](README.md) for current capabilities.
 
+## v0.54.0 — explicit multipass ownership and diagnostics
+
+- Replace module-static multipass cache with explicit per-session ownership and a local CLI cache. Stop and close release the session cache after managed workers finish. Same-size slot reuse remains within each session.
+- Avoid mixed wide/narrow output in adapter reporting; GPU pass checkpoints use flushed stderr, while verification remains flushed stdout. Add ABI exception and queue render status reporting.
+- GPU fixture explicitly closes sessions before the success marker and verifies a fresh session against the CPU oracle. Validation wrapper reports process status and labels stdout/stderr separately. Requires the reopened-session lifecycle marker and verifies the six queued GPU passes actually used four allocations and two reuses via cache teardown counters. A failed in-flight submission receives a bounded best-effort drain during explicit teardown; failure recovery is not guaranteed. Portable lifecycle contract checks reject missing markers.
+- v0.53.0 Windows: 15/15 focused tests and 2/4 GPU tests passed; both ABI GPU fixtures exited zero with empty output. Exact root cause unconfirmed. v0.54.0 Windows/GPU validation pending. Portable Release: 74/74 CTest and 2/2 Python tests; multipass, queue integration and validation contract each passed 20 consecutive runs.
+
+## v0.53.0 — fail-closed GPU validation and tracked queue integration
+
+- Move four desktop GPU comparisons into an opt-in CTest group with serial execution and per-process timeout. Each wrapper requires both zero exit status and the expected stdout marker; empty or stderr-only output and nonzero exit cannot pass. Portable contract fixture tests these four cases. Windows PowerShell logs each command, explicit success/failure, the executable version and optional SDK skips; native exit status is reset before invocation. The exact cause of missing v0.52.0 output is not yet established.
+- Add independent C queue snapshot API (`rq_query`), exposing alias count, active callbacks, pending counts and stop/cancellation state atomically. Invalid queries do not mutate the caller's snapshot.
+- Add `rq_submit_tracked` and `rq_cancel` for individual pending callbacks. Context-scoped, monotonic tickets; aliases may cancel the same logical queue's work; cancellation claims pending work atomically and invokes the callback outside the lock. Existing eight exports remain unchanged. This is not a Microsoft GDK ABI or retained operation-status API.
+- Add a dedicated cancellation fixture exercising 128 dispatch/cancel races, exactly-once callbacks, foreign/stale tickets, reentrant completion, stop and snapshot validation.
+- Expand managed-thread rendering from one workload to six across three sizes, with 1,125 checked pixels and completion-port callbacks; two same-size reuse opportunities and three extent changes. Actual GPU slot reuse inside the DLL remains unverified. No new console loader or shader translation.
+- Portable Release: 74/74 CTest and 2/2 Python tests passed; cancellation, integration and validation contract each passed 20 consecutive runs. Windows and GPU validation pending. Expected focused Windows regression: 15 tests with GDK (14 without), followed by four required desktop GPU tests. Full Windows non-GPU regression expected 95 with GDK (94 without). See docs/VALIDATION_053.md.
+
+## v0.52.0 — persistent desktop multipass and fixed typed binding
+
+- Fixed self-authored PE fixture validates the single exact typed host import, image extent and unsupported initialisation flags before writing the IAT. Eight malformed plans rejected without mutation. Existing two-map relocation, permissions, invocation and unwind tests are now in the focused aggregate. No arbitrary import resolution or external execution.
+- Desktop multipass backend retains a hardware device, two root signatures, four fixed PSOs, direct queue, fence/event and a single size-keyed slot of descriptor heaps, colour/depth surfaces, readbacks, allocator and command list. Serialised access, monotonic fence and explicit colour state restoration; size change replaces a completed slot. Failed recording/submission/readback poisons the context; no automatic recovery. Cache is per module, not shared across processes or the executable/DLL.
+- Existing GPU pass command now verifies 24 additional workloads (21,504 pixels), including 23 slot reuses and one size change after initial allocation. Reports elapsed wall time including CPU oracle, not game FPS. Windows GPU code not locally compiled or run.
+- Portable Release: 72/72 CTest, 2/2 Python, fixed image 20 repeated executions passed. Expected Windows focused 13 with GDK or 12 without; full suite remains 93 with GDK or 92 without. Existing GCC u8path deprecation warning remains.
+
+### Subsequent Windows validation
+
+- v0.52.0 focused 13/13 (0.83 s), build 56.70 s, automatic GDK detection, fixed native image and queue CPU integration passed. Desktop CLI texture sampling checked 320 samples (max absolute error 7.62939e-06); persistent render pass checked 24 workloads, 21,504 pixels and 23 reuses (9.9703 ms including CPU oracle); original render pass max byte error 1. The configurable native ABI and native queue GPU sections printed no results, so neither is confirmed by this log. Full Windows regression not run.
+
+## v0.51.0 — independent native task queue integration
+
+- Separate versioned `revenge_queue` shared library with eight C exports; bounded opaque context and 64 handles, duplicate/close semantics, two ports, 128 pending callbacks per port, monotonic deadlines, timeout dispatch, wakeups, cancellation and active callback close protection. Callbacks execute on the caller thread outside the lock. Destruction requires joined callers. No Microsoft ABI substitution or guest import binding.
+- Independently compiled C client exercises the shared delayed workload, alias lifetime, stale handles and limits. C++ client exercises 4,096 parallel dispatches, reentrant submission, timed wakeup, active-close rejection, 128 cancellations and stop wakeup; a Revenge-managed native worker dispatches an existing native graphics ABI render command and checks 192 pixels, verifies worker completion, exit, release and session shutdown. CPU and optional Windows GPU modes.
+- Focused aggregate and validation scripts include both clients and integrated GPU validation. Portable Release 72/72 CTest, 2/2 Python, both new tests passed 20 repeated runs each. Expected Windows focused 12 with GDK (11 without); full 93 with GDK (92 without). Existing GCC u8path deprecation warning remains. No GDKX, no general executable loader, GameInput or persistent multipass optimisation. Windows validation pending.
+
+### Subsequent Windows validation
+
+- v0.51.0 focused 12/12 (0.78 s), build 56.62 s; 4,096 parallel callback dispatches, 128 cancellations and 192 desktop GPU pixels via a managed native thread passed. Full Windows suite not run.
+
+## v0.50.0 — scheduled queues and runtime dependency visibility
+
+- Refactored SDK discovery into a testable helper: normalised separators, explicit override precedence, fallback from incomplete environment paths, numeric version sorting, and standard Program Files roots. Synthetic directory tests pass; actual automatic discovery awaits Windows validation.
+- Independent virtual-time scheduled queue model supports bounded duplicate handles, close and stale-handle rejection, independent work/completion ports, due-time ordering and cancellation. 256 workloads dispatch 1,024 callbacks and cancel 512; another 128 cancellations exercise capacity. Shared two-callback delayed reference trace is an additional check. No thread-pool or GDK binary ABI implementation.
+- Extended the genuine PC GDK reference with handle duplication, original handle close, delayed dispatch and pending delayed cancellation. Own-process module snapshots before/after initialise, after workload and after shutdown; loaded module basenames and selected public export visibility. No foreign process inspection, injection or guest binding. These diagnostics do not record actual dynamic API calls.
+- Portable Release: 70 CTest and two Python tests passed. Expected Windows focused count 10 with GDK or 9 without; expected full Windows count 91 with GDK or 90 without. No console execution, general loader, GameInput or persistent multipass GPU optimisation added. Existing GCC u8path warning remains.
+
+### Subsequent Windows validation
+
+- v0.50.0 focused 10/10 (0.71 s); build 58.11 s. Automatic October 2026 GDK discovery passed. Real GDK delayed/duplicate trace matched the independent reference, module count 13 to 53 at initialisation and 43 after shutdown, public named export matches zero. Existing GPU comparisons passed; full Windows suite not run.
+
+## v0.49.0 — public Windows GDK reference
+
+- Optional PC GDK detection using the versioned Windows headers and x64 import library, with explicit root override and opt-out. No SDK binaries, private extensions or third-party repository copies are included.
+- Added a self-authored SDK-linked desktop reference covering real XGameRuntime lifecycle, device type, manual work/completion dispatch, pending callback cancellation and the shared scripted game trace. Windows compilation and runtime execution pending; real SDK/runtime failures are reported, not treated as success.
+- Independent bounded manual queue model passed 4,096 callback dispatches and 128 cancellations. Shared deterministic workload validates port isolation and checksums; no concurrency, timing or GDK binary ABI claim.
+- Added 20 public API catalog entries and offline direct named-import inventory. Names are not evidence of ABI compatibility, static SDK code may not appear, no addresses are bound.
+- Focused build includes the new model, catalog and optional reference. README progress and architecture retained. Portable Release: 68 CTest and two Python tests; expected Windows total 88 without GDK or 89 with GDK. Existing GCC u8path warning remains. No guest loader, GameInput, persistent multipass GPU optimisation or console API implementation added.
+
+### Subsequent Windows validation
+
+- v0.49.0 focused with explicit SDK path: 8/8 tests passed (0.32 s), incremental build 2.51 s, XGameRuntimeInitialize HRESULT 0, device type PC, identical manual queue traces, two pending GDK callbacks canceled. 96 named direct imports and zero catalog matches, 77 unwind entries, 32 relocations. GPU comparisons passed. Automatic detection failed in the first run; full Windows suite not run.
+
+## v0.48.0 — configurable native ABI multipass rendering
+
+- Added `RV_PASS_RENDER` (operation 64) to the existing five-export ABI v1. The independently compiled native client supplies a bounded list of draws, framebuffer dimensions, per-draw scissor and depth, and one of three existing pipeline modes. Returns three tightly packed RGBA8 surfaces. CPU reference and Windows GPU paths share validated inputs; fixed shader colours and composition remain unchanged.
+- Generalised D3D12 render-pass code from a fixed fixture to caller-configurable workloads, including explicit full-size composition scissor after the last draw and mode-based PSO selection. GPU readback is returned to the caller, rather than consumed by the fixed oracle alone.
+- Added 48 CPU workloads (63,708 pixels), independent expected-colour tests, malformed-packet rejection, separate sessions and stop-state verification. Windows GPU comparison runs six workloads; not executed locally. No arbitrary shaders, persistent targets, general console graphics command translation or executable loading added.
+- Focused build now uses a single aggregate target; includes the independently linked ABI client and the existing four graphics tests. Full portable Release: 66/66 CTest and 2/2 Python tests passed. Expected full Windows test count: 86. Existing GCC u8path deprecation warning remains.
+- Updated README progress and architecture diagrams and preserved all historical release notes.
+
+### Subsequent Windows validation
+
+- v0.48.0 focused: 5/5 tests passed (0.28 s); build 55.02 s; 320 texture samples, 768 fixed render-pass pixels, six configurable multipass workloads (50,196 pixels), max colour byte error 1, 13 invalid packets rejected. Full suite not run.
+
 ## v0.47.0 — offscreen multipass graphics foundation
 
 - Added independent 16×16 CPU reference for two simultaneous render targets, depth testing, stencil replacement/equality, scissor coverage, per-target colour masks, source-alpha blending and two-texture composition. Known-answer test checks all 768 pixels across three surfaces (80 covered pixels per surface).
@@ -9,6 +81,10 @@ Historical release notes, newest first. Historical test counts and planned featu
 - Focused mode now runs four CPU tests and both desktop graphics comparisons. Full suite is still available. Portable Release: 65/65 CTest and 2/2 Python tests passed; expected full Windows suite: 85. Existing GCC u8path deprecation warning remains.
 - Restored current subsystem status table, progress diagram, achievements and architecture diagram in README without moving version history out of CHANGELOG.
 - Depth sampling, general constant/structured buffer integration, persistent graphics PSO caching, general executable loading and Xbox API translation remain outstanding.
+
+### Subsequent Windows validation
+
+- v0.47.0 focused: 4/4 tests passed (0.23 s), 320 GPU texture samples, 768 GPU render-pass pixels (maximum byte error 1), build 67.89 s. Full Windows suite not run.
 
 ## v0.46.0 — desktop GPU texture sampling and focused iteration
 

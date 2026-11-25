@@ -1,5 +1,6 @@
 #include "revenge/native_abi.h"
 #include "revenge/application.hpp"
+#include "revenge/render_pass_fixture.hpp"
 #include "revenge/multimedia.hpp"
 #include <filesystem>
 #include <string>
@@ -85,9 +86,16 @@ struct JobQueue {
 }
 struct ManagedThread { std::thread worker; uint32_t state=RV_THREAD_RUNNING, code=0; };
 struct rv_session { std::mutex thread_mutex; std::condition_variable thread_cv; std::map<uint64_t,std::shared_ptr<ManagedThread>> threads; bool closing=false; std::mutex tls_mutex; std::map<uint64_t,std::map<uint64_t,uint64_t>> tls_slots; std::mutex gfx_mutex; std::map<uint64_t,revenge::package::Programs> packages; std::map<uint64_t,GraphicsResource> resources; size_t resource_bytes=0; a::Runtime runtime{[](unsigned,unsigned){revenge::scene3d::validate(revenge::scene3d::geometry(),revenge::scene3d::commands());}};JobQueue queue;
+ #ifdef _WIN32
+ std::shared_ptr<revenge::passes::PassCache> pass_cache;
+ #endif
  ~rv_session(){ // No external calls may race close; managed callbacks may finish naturally.
   {std::lock_guard lock(thread_mutex);closing=true;}
   for(auto& entry:threads)if(entry.second->worker.joinable())entry.second->worker.join();
+  queue.shutdown();
+#ifdef _WIN32
+  {std::lock_guard lock(gpu_mutex);pass_cache.reset();}
+#endif
  }
 };
 namespace {
@@ -109,6 +117,34 @@ uint32_t RV_CALL rv_dispatch(rv_session* s,const rv_request* request,void* buffe
  if(r.reserved)return RV_INVALID;
  if(capacity>RV_MAX_TRANSFER)return RV_RANGE;
  if(capacity&&!buffer)return RV_INVALID;
+ if(r.op==RV_PASS_RENDER){
+  if(r.handle||r.offset||r.arg1||r.arg0>1||!buffer)return RV_INVALID;
+  if(r.count<sizeof(rv_pass_header)||r.count>capacity)return RV_RANGE;
+  rv_pass_header h{};std::memcpy(&h,buffer,sizeof(h));
+  if(h.reserved)return RV_INVALID;
+  if(!h.width||!h.height||h.width>128||h.height>128||!h.draw_count||h.draw_count>64)return RV_RANGE;
+  const size_t input=sizeof(h)+size_t(h.draw_count)*sizeof(rv_pass_draw),output=size_t(h.width)*h.height*12;
+  if(r.count!=input||capacity!=std::max(input,output))return RV_RANGE;
+  try{
+   std::lock_guard lock(s->gfx_mutex);if(!s->runtime.stats().running)return RV_STATE;
+   std::vector<revenge::passes::Draw> commands;commands.reserve(h.draw_count);
+   for(unsigned i=0;i<h.draw_count;++i){rv_pass_draw d{};std::memcpy(&d,static_cast<const uint8_t*>(buffer)+sizeof(h)+size_t(i)*sizeof(d),sizeof(d));if(d.depth256>256)return RV_INVALID;commands.push_back({{d.left,d.top,d.right,d.bottom},float(d.depth256)/256,d.mode});}
+   revenge::passes::validate(h.width,h.height,commands);revenge::passes::Images images;
+   if(!r.arg0)images=revenge::passes::reference(h.width,h.height,commands);
+   else{
+#ifdef _WIN32
+    std::lock_guard gpu_lock(gpu_mutex);if(!s->pass_cache)s->pass_cache=revenge::passes::create_pass_cache();images=revenge::passes::render_gpu(*s->pass_cache,h.width,h.height,commands);
+#else
+    return RV_UNSUPPORTED;
+#endif
+   }
+   const size_t pixels=size_t(h.width)*h.height;
+   for(const auto& image:images)if(image.size()!=pixels)return RV_FAILURE;
+   static_assert(sizeof(revenge::passes::Pixel)==4);
+   for(size_t i=0;i<images.size();++i)std::memcpy(static_cast<uint8_t*>(buffer)+i*pixels*4,images[i].data(),pixels*4);
+   *result=output;return RV_OK;
+  }catch(const std::exception& e){if(r.arg0)std::cerr<<"[ABI pass] "<<e.what()<<std::endl;return error();}catch(...){if(r.arg0)std::cerr<<"[ABI pass] unknown exception"<<std::endl;return error();}
+ }
  if(r.op>=RV_MEDIA_CAPS&&r.op<=RV_RES_PATCH){
   try{
    if(!s->runtime.stats().running)return RV_STATE;
@@ -281,7 +317,7 @@ uint32_t RV_CALL rv_dispatch(rv_session* s,const rv_request* request,void* buffe
    if(r.op==RV_GFX_CAPS){
     *result=RV_GFX_ASYNC;
 #ifdef _WIN32
-    *result|=RV_GFX_GPU|RV_GFX_PRESENT|RV_GFX_CONTINUOUS|RV_GFX_CUSTOM;
+    *result|=RV_GFX_GPU|RV_GFX_PRESENT|RV_GFX_CONTINUOUS|RV_GFX_CUSTOM|RV_GFX_MULTIPASS;
 #endif
     return RV_OK;
    }
@@ -364,7 +400,11 @@ uint32_t RV_CALL rv_dispatch(rv_session* s,const rv_request* request,void* buffe
  case RV_CLOCK:*result=std::get<uint64_t>(rt.dispatch(a::Clock{}));break;
  case RV_RENDER_VALIDATE:if(r.arg0>3840||r.arg1>2160)return RV_RANGE;rt.dispatch(a::Render{static_cast<unsigned>(r.arg0),static_cast<unsigned>(r.arg1)});break;
  case RV_STATS:{if(capacity<sizeof(rv_stats))return RV_RANGE;auto v=rt.stats();rv_stats stats{v.memory_handles,v.events,v.files,v.storage_bytes,v.committed,v.running?1u:0u};std::memcpy(buffer,&stats,sizeof(stats));*result=sizeof(stats);break;}
- case RV_STOP:{std::lock_guard thread_lock(s->thread_mutex);if(s->closing||!s->threads.empty())return RV_STATE;std::lock_guard lock(s->gfx_mutex);{std::lock_guard tls_lock(s->tls_mutex);rt.dispatch(a::Stop{});s->tls_slots.clear();}s->queue.shutdown();s->packages.clear();s->resources.clear();s->resource_bytes=0;break;}
+ case RV_STOP:{std::lock_guard thread_lock(s->thread_mutex);if(s->closing||!s->threads.empty())return RV_STATE;std::lock_guard lock(s->gfx_mutex);{std::lock_guard tls_lock(s->tls_mutex);rt.dispatch(a::Stop{});s->tls_slots.clear();}s->queue.shutdown();
+#ifdef _WIN32
+ {std::lock_guard gpu_lock(gpu_mutex);s->pass_cache.reset();}
+#endif
+ s->packages.clear();s->resources.clear();s->resource_bytes=0;break;}
  default:return RV_UNSUPPORTED;
  }return RV_OK;}catch(...){*result=0;return error();}
 }

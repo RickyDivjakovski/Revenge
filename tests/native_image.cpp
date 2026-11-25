@@ -24,6 +24,16 @@ constexpr uint32_t import_entry=0x1040, import_slot=0x2040;
 unsigned fixture_answer() noexcept {return 0x5256u;}
 void check(bool ok,const char* why){if(!ok)throw std::runtime_error(why);}
 void put(std::vector<uint8_t>& b,size_t p,uint64_t v,unsigned n){for(unsigned i=0;i<n;++i)b.at(p+i)=static_cast<uint8_t>(v>>(8*i));}
+// Typed, fixed fixture binder. Validate complete plan before mutating any bytes.
+using HostAnswer=unsigned(*)() noexcept;
+void bind_fixture(LoadPlan& plan){
+ check(plan.slots.size()==1&&plan.mapped.size()==extent,"unexpected fixture import count or extent");
+ check(!plan.delay_imports&&!plan.load_config&&!plan.image.tls,"unsupported fixture initialisation");
+ const auto& slot=plan.slots.front();
+ check(slot.dll=="rv_fixture_host.dll"&&slot.symbol=="rv_fixture_answer"&&slot.rva==import_slot,"unknown fixture import");
+ const HostAnswer answer=&fixture_answer;
+ put(plan.mapped,import_slot,reinterpret_cast<uintptr_t>(answer),8);
+}
 std::vector<uint8_t> fixture(){
  std::vector<uint8_t> b(0xa00);constexpr size_t o=0x98,s=o+240;
  put(b,0,0x5a4d,2);put(b,0x3c,0x80,4);put(b,0x80,0x4550,4);put(b,0x84,0x8664,2);put(b,0x86,3,2);put(b,0x94,240,2);put(b,0x96,0x22,2);
@@ -84,9 +94,7 @@ struct Mapping {
  check(init_metadata_report(plan).find("maximum local stack adjustment=40")!=std::string::npos,"fixed unwind metadata mismatch");
  check(page_layout(plan)==std::vector<PageSpan>{{0,4096,9},{4096,4096,13},{8192,4096,11},{12288,4096,0},{16384,4096,9}},"fixture page layout mismatch");
  check(std::all_of(plan.mapped.begin()+0x2200,plan.mapped.begin()+0x3000,[](uint8_t v){return v==0;}),"zero-fill mismatch");
- const auto& slot=plan.slots.front();check(slot.dll=="rv_fixture_host.dll"&&slot.symbol=="rv_fixture_answer"&&slot.rva==import_slot,"fixed host import declaration mismatch");
- // No dynamic lookup, external module, arbitrary input or generic import binder.
- put(plan.mapped,import_slot,reinterpret_cast<uintptr_t>(&fixture_answer),8);
+ bind_fixture(plan);
  std::memcpy(p,plan.mapped.data(),extent);for(auto span:page_layout(plan))protect(span.rva,span.bytes,span.flags);
 #ifdef _WIN32
  check(FlushInstructionCache(GetCurrentProcess(),p+0x1000,4096)!=0,"instruction cache flush failed");
@@ -117,6 +125,9 @@ struct Mapping {
 }
 int main(){try{
 #if (defined(_WIN32) && (defined(_M_X64)||defined(__x86_64__))) || (defined(__linux__) && defined(__x86_64__))
+ auto baseline=prepare_image(fixture(),preferred);unsigned rejected=0;
+ for(unsigned variant=0;variant<8;++variant){auto bad=baseline;switch(variant){case 0:bad.slots[0].dll="wrong.dll";break;case 1:bad.slots[0].symbol="wrong";break;case 2:bad.slots[0].rva+=8;break;case 3:bad.slots.push_back(bad.slots[0]);break;case 4:bad.slots.clear();break;case 5:bad.delay_imports=true;break;case 6:bad.image.tls=true;break;case 7:bad.load_config=true;break;}auto before=bad.mapped;bool failed=false;try{bind_fixture(bad);}catch(const std::runtime_error&){failed=true;}check(failed&&before==bad.mapped,"invalid fixture binding modified image");++rejected;}
+ std::cout<<"Fixed typed binding: "<<rejected<<" malformed plans rejected without mutation.\n";
  Mapping a,b;a.prepare();b.prepare();check(a.p!=b.p,"mapping isolation");check(a.invoke()==42&&a.invoke()==43&&b.invoke()==42&&a.invoke()==44&&b.invoke()==43,"relocated entry results");check(a.invoke_import()==0x5256u&&b.invoke_import()==0x5256u,"fixed host import call results");
  #ifdef _WIN32
  a.verify_unwind();b.verify_unwind();std::cout<<"Fixed native unwind: two registered tables, lookup, virtual stack recovery, wrapper calls and deregistration passed.\n";

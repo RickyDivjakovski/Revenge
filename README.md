@@ -6,7 +6,7 @@
 
 **Native execution. Hardware-adaptive graphics. Performance first.**
 
-![Version](https://img.shields.io/badge/version-0.47.0-1E90FF?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-0.54.0-1E90FF?style=for-the-badge)
 ![Language](https://img.shields.io/badge/C%2B%2B-20-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)
 ![Platform](https://img.shields.io/badge/target-Windows%20x64-0078D4?style=for-the-badge)
 ![Graphics](https://img.shields.io/badge/graphics-DirectX%2012-555555?style=for-the-badge)
@@ -32,7 +32,7 @@ The project targets desktop Direct3D 12, vendor-adaptive GPU detection and RDNA2
 
 ## Development progress
 
-### Current release: v0.47.0
+### Current release: v0.54.0
 
 The following diagram shows the state of the main components, rather than an arbitrary percentage of the entire project.
 
@@ -44,7 +44,13 @@ flowchart TD
     C -.-> D
     E[Restricted RDNA2 translation]:::partial --> F[Desktop D3D12 backend]:::tested
     G[Compressed textures and mip filtering]:::tested --> F
-    F --> H[Multipass MRT and composition fixture]:::pending
+    F --> H[Multipass MRT and composition fixture]:::tested
+    H --> L[Configurable native ABI multipass service]:::tested
+    L --> U[Persistent multipass cache]:::tested
+    Q[Public PC GDK reference]:::tested -.-> I
+    R[Independent manual and scheduled queues]:::tested --> Q
+    S[Independent C queue ABI]:::tested --> R
+    S --> L
     D -.-> I[Xbox system APIs]:::planned
     D -.-> J[Xbox graphics translation]:::planned
     I -.-> K[Actual Xbox gameplay]:::planned
@@ -75,7 +81,12 @@ flowchart TD
 | D3D12.X graphics translation | ⚪ Pending | Console-specific device, resources, commands and presentation |
 | Native shader recompilation | 🟡 Partial | Restricted RDNA2 ALU, flow, memory and stage fixtures; not general console shaders |
 | Texture layout and filtering | 🟢 Tested | Independent layout reference and D3D12 RGBA8/BC1/3/4/5 sampling, mips and arrays; not console tiling |
-| Multipass render targets | 🟡 Pending GPU validation | Two MRTs, depth/stencil, blending, scissor and render-to-texture fixture |
+| Multipass render targets | 🟢 Tested | Two MRTs, depth/stencil, blending, scissor and render-to-texture fixture |
+| Persistent multipass cache | 🟢 Desktop CLI tested | Device, queue, fence, two root signatures, four PSOs and one size-keyed resource slot; per-session ABI DLL ownership and GPU reuse need confirmed validation |
+| Configurable native ABI multipass | 🟢 Tested | Client-defined dimensions and draw lists, restricted modes, three RGBA8 outputs |
+| Public Windows GDK reference | 🟢 Tested | PC lifecycle, manual/delayed queues, duplicate handles and module diagnostics validated on v0.50.0 |
+| Independent manual and scheduled queues | 🟢 Tested | Bounded ports, virtual deadlines, duplicate handles, cancellation, capacity, stale handles and API inventory; no GDK ABI |
+| Independent C queue ABI | 🟢 Tested (portable additions) | Thread-safe handles, real-time delay, snapshots, tracked pending cancellation, reentrant callbacks and managed-thread CPU rendering; current GPU integration pending |
 | Ray tracing | ⚪ Pending | Console acceleration structures and shader translation; hardware capability detection only |
 | Audio, input, storage and lifecycle | 🟡 Partial | Independent Windows-backed adapters; physical audio/controller checks incomplete |
 | Runtime pipeline cache | 🟡 Partial | Restricted fixture pipeline reuse and compute cache; general persistent graphics cache incomplete |
@@ -84,7 +95,7 @@ flowchart TD
 
 ### What has been achieved
 
-The current C++20 codebase passes 65 portable CTest tests and two Python tests. The last full Windows suite passed 83/83 tests on v0.45.0; the v0.46.0 focused Windows run passed all three selected tests and 320 desktop GPU texture comparisons. The new render-pass reference checks 768 pixels across three surfaces. The v0.47.0 Windows GPU render-pass test is pending.
+The v0.53.0 Windows focused suite passed 15/15 tests and two of four desktop GPU tests. Both ABI GPU fixtures exited zero without output and failed strict validation. The current release uses session-owned multipass caches, explicit teardown, narrow adapter reporting and flushed diagnostic checkpoints. GPU fixtures still require successful execution and verified pixel output; Windows validation of v0.54.0 is pending.
 
 These results demonstrate independent executable preparation, fixed native execution, host runtime services and desktop graphics. They do **not** demonstrate execution of an Xbox title or a complete console compatibility layer. No title-specific or protected material is distributed.
 
@@ -102,9 +113,15 @@ flowchart LR
     G --> H[Desktop Direct3D 12]
     E -.-> H
     M[Independent game and native ABI] --> H
+    M --> P[Configurable multipass service]
+    P --> H
     H --> I[PC GPU]
     H --> T[Texture and multipass fixtures]
     D -.-> W[Windows platform adapters]
+    Q[Public PC GDK reference] -.-> W
+    R[Independent manual queue model] --> Q
+    S[Independent native C task queue] --> M
+    S --> R
 ```
 
 The diagram represents the intended full runtime. Solid connections describe existing independent research paths; dashed connections are future integration work. The desktop graphics backend is not a functioning console-to-PC rendering pipeline.
@@ -115,6 +132,10 @@ The diagram represents the intended full runtime. Solid connections describe exi
 - Documented Xbox platform service and graphics interface compatibility.
 - Broader shader instruction, resource and command coverage.
 - Authorised console-targeted development application validation, followed by gameplay and performance testing.
+
+See [persistent multipass and typed binding](docs/PERSISTENT_052.md) for the new limits and validation.
+
+See [native queue ABI](docs/QUEUE_ABI_051.md) for the trusted-client interface and lifetime rules, [validation and queue extensions](docs/VALIDATION_053.md) for the queue API, and [GPU lifecycle validation](docs/VALIDATION_054.md) for current checks.
 
 ## Requirements
 
@@ -127,6 +148,7 @@ The diagram represents the intended full runtime. Solid connections describe exi
 | CMake | 3.20 or newer |
 | Python | 3.9+ for shader tooling and tests |
 | DXC | Optional for offline shader experiments |
+| Public GDK | Optional Windows reference; installed externally, see [guide](docs/PUBLIC_GDK_050.md) |
 
 Linux supports portable core tests, not the Windows GPU backend. NVIDIA, AMD and Intel adapters are detected through standard APIs; physical cross-vendor validation is incomplete.
 
@@ -142,16 +164,21 @@ This builds the Release configuration, runs automated regression and GPU fixture
 
 For faster development iterations, keep the existing `build` directory and use `-FastBuild -BuildJobs 2`. This disables interprocedural optimisation while keeping Release optimisation, and builds with two concurrent jobs. Use the same flags on subsequent runs to avoid rebuilding when switching optimisation modes. Reduce to `-BuildJobs 1` if memory pressure or compiler file-access errors occur. Omit `-FastBuild` for the standard optimised build.
 
-For focused development checks, add `-Focused` to the validation command. It builds only Revenge and the four relevant test executables, runs four CPU regression tests and the desktop GPU sampling and render-pass comparisons. It does not certify the full suite. Run the command without `-Focused` for complete validation. When updating from an exact previous release, the optional incremental source archive replaces only changed files, preserving other source timestamps and existing build outputs.
+For focused development checks, add `-Focused` to the validation command. It builds Revenge, the native ABI library, selected graphics and platform tests, and the optional GDK reference through one aggregate target. It runs selected portable regression tests including the fixed native image fixture, the GDK reference when enabled, and separately runs four required desktop GPU comparisons (texture sampling, render passes, configurable ABI multipass, and native queue integration). Each GPU check requires a successful exit and verification output. It does not certify the full suite. Run the command without `-Focused` for complete validation. When updating from an exact previous release, the optional incremental source archive replaces only changed files, preserving other source timestamps and existing build outputs.
+
+The installed public GDK is detected via `GameDKCoreLatest`, `GameDK`, or the standard Program Files installation roots. Use `-GdkRoot "C:\Program Files (x86)\Microsoft GDK\261000"` to select an explicit SDK, or `-SkipGdk` to disable the optional reference. No SDK files are copied into Revenge.
 
 ## Using Revenge
 
 ```powershell
 .\build\Release\Revenge.exe --help
 .\build\Release\Revenge.exe gpu-info
+.\build\Release\Revenge.exe gdk-api-registry
 .\build\Release\Revenge.exe inspect .\build\Release\RevengePlatformProbe.exe
 .\build\Release\Revenge.exe target-plan .\build\Release\RevengePlatformProbe.exe
 ```
+
+Native clients can call `RV_PASS_RENDER` for bounded desktop multipass rendering; see [the service contract](docs/MULTIPASS_048.md).
 
 The diagnostic commands inspect executable metadata without executing the inspected file. The native Windows process runner uses the normal OS loader and is not an Xbox execution environment or security sandbox. Use only trusted, authorised development files.
 

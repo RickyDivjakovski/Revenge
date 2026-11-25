@@ -19,7 +19,7 @@ extern "C" {
 #define RV_MAX_TRANSFER 1048576u
 typedef struct rv_session rv_session;
 enum rv_status { RV_OK=0, RV_INVALID=1, RV_VERSION=2, RV_UNSUPPORTED=3, RV_RANGE=4, RV_STATE=5, RV_FAILURE=6 };
-enum rv_op { RV_ALLOC=1, RV_FREE=2, RV_READ=3, RV_WRITE=4, RV_EVENT_CREATE=5, RV_EVENT_SET=6, RV_EVENT_RESET=7, RV_EVENT_WAIT=8, RV_EVENT_CLOSE=9, RV_CLOCK=10, RV_RENDER_VALIDATE=11, RV_STATS=12, RV_STOP=13, RV_GFX_CAPS=14, RV_GFX_LOAD=15, RV_GFX_RELEASE=16, RV_GFX_DRAW=17, RV_GFX_COUNT=18, RV_GFX_RUN=19, RV_RES_CREATE=20, RV_RES_RELEASE=21, RV_CMD_VALIDATE=22, RV_CMD_SUBMIT=23, RV_RES_COUNT=24, RV_RES_UPDATE=25, RV_JOB_SUBMIT=26, RV_JOB_POLL=27, RV_JOB_WAIT=28, RV_JOB_READ=29, RV_JOB_RELEASE=30, RV_JOB_COUNT=31, RV_MUTEX_CREATE=32, RV_MUTEX_LOCK=33, RV_MUTEX_UNLOCK=34, RV_MUTEX_CLOSE=35, RV_SEM_CREATE=36, RV_SEM_WAIT=37, RV_SEM_RELEASE=38, RV_SEM_CLOSE=39, RV_STORE_PUT=40, RV_STORE_GET=41, RV_STORE_SIZE=42, RV_STORE_ERASE=43, RV_SYNC_COUNT=44, RV_TLS_CREATE=45, RV_TLS_SET=46, RV_TLS_GET=47, RV_TLS_RELEASE=48, RV_TLS_DETACH=49, RV_TLS_COUNT=50, RV_THREAD_CREATE=51, RV_THREAD_POLL=52, RV_THREAD_WAIT=53, RV_THREAD_EXIT=54, RV_THREAD_RELEASE=55, RV_THREAD_COUNT=56, RV_MEDIA_CAPS=57, RV_AUDIO_PLAY=58, RV_PAD_POLL=59, RV_SNAPSHOT_SAVE=60, RV_SNAPSHOT_LOAD=61, RV_GFX_LOAD_CUSTOM=62, RV_RES_PATCH=63 };
+enum rv_op { RV_ALLOC=1, RV_FREE=2, RV_READ=3, RV_WRITE=4, RV_EVENT_CREATE=5, RV_EVENT_SET=6, RV_EVENT_RESET=7, RV_EVENT_WAIT=8, RV_EVENT_CLOSE=9, RV_CLOCK=10, RV_RENDER_VALIDATE=11, RV_STATS=12, RV_STOP=13, RV_GFX_CAPS=14, RV_GFX_LOAD=15, RV_GFX_RELEASE=16, RV_GFX_DRAW=17, RV_GFX_COUNT=18, RV_GFX_RUN=19, RV_RES_CREATE=20, RV_RES_RELEASE=21, RV_CMD_VALIDATE=22, RV_CMD_SUBMIT=23, RV_RES_COUNT=24, RV_RES_UPDATE=25, RV_JOB_SUBMIT=26, RV_JOB_POLL=27, RV_JOB_WAIT=28, RV_JOB_READ=29, RV_JOB_RELEASE=30, RV_JOB_COUNT=31, RV_MUTEX_CREATE=32, RV_MUTEX_LOCK=33, RV_MUTEX_UNLOCK=34, RV_MUTEX_CLOSE=35, RV_SEM_CREATE=36, RV_SEM_WAIT=37, RV_SEM_RELEASE=38, RV_SEM_CLOSE=39, RV_STORE_PUT=40, RV_STORE_GET=41, RV_STORE_SIZE=42, RV_STORE_ERASE=43, RV_SYNC_COUNT=44, RV_TLS_CREATE=45, RV_TLS_SET=46, RV_TLS_GET=47, RV_TLS_RELEASE=48, RV_TLS_DETACH=49, RV_TLS_COUNT=50, RV_THREAD_CREATE=51, RV_THREAD_POLL=52, RV_THREAD_WAIT=53, RV_THREAD_EXIT=54, RV_THREAD_RELEASE=55, RV_THREAD_COUNT=56, RV_MEDIA_CAPS=57, RV_AUDIO_PLAY=58, RV_PAD_POLL=59, RV_SNAPSHOT_SAVE=60, RV_SNAPSHOT_LOAD=61, RV_GFX_LOAD_CUSTOM=62, RV_RES_PATCH=63, RV_PASS_RENDER=64 };
 /* MEDIA_CAPS: bits 1 PCM playback, 2 XInput, 4 snapshots. Compiled capabilities only.
    AUDIO_PLAY: count=bytes, buffer=48 kHz stereo PCM16, 20..2000 ms, synchronous.
    PAD_POLL: arg0=controller index 0..3; buffer=rv_pad_state; disconnected is success.
@@ -60,6 +60,16 @@ enum rv_thread_state { RV_THREAD_RUNNING=1, RV_THREAD_COMPLETE=2, RV_THREAD_FAIL
 #define RV_GFX_CONTINUOUS 4u
 #define RV_GFX_CUSTOM 8u
 #define RV_GFX_ASYNC 16u
+#define RV_GFX_MULTIPASS 32u
+/* PASS_RENDER: arg0=0 CPU reference, 1 desktop GPU. count=input bytes.
+   Buffer starts with rv_pass_header and draw_count rv_pass_draw records.
+   Exact capacity=max(input bytes, width*height*12). On success the buffer
+   begins with three tightly packed RGBA8 surfaces in target order.
+   1..128 extent, 1..64 draws, depth256=0..256. mode=0 stencil replace,
+   1 stencil equal opaque, 2 stencil equal alpha blend target 0 only.
+   Fixed shader colours and depth LESS. All other request fields zero. */
+typedef struct rv_pass_header { uint32_t width,height,draw_count,reserved; } rv_pass_header;
+typedef struct rv_pass_draw { uint32_t left,top,right,bottom,depth256,mode; } rv_pass_draw;
 /* UPDATE replaces all bytes of a vertex/index/texture resource, same length and dimensions.
    JOB_SUBMIT: handle=commands, arg0/arg1=width/height, offset=mode (0 GPU, 1 validate-only, 2 GPU quiet per-frame logging).
    Returns a job handle; at most four jobs (including completed) per session.

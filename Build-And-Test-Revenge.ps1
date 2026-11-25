@@ -1,4 +1,4 @@
-param([switch]$Play, [switch]$Hardware, [string]$AuthorisedTarget = '', [string]$ProbeTrace = '', [string[]]$DependencyDlls = @(), [ValidateRange(1,64)][int]$BuildJobs = 1, [switch]$FastBuild, [switch]$Focused)
+param([switch]$Play, [switch]$Hardware, [string]$AuthorisedTarget = '', [string]$ProbeTrace = '', [string[]]$DependencyDlls = @(), [ValidateRange(1,64)][int]$BuildJobs = 1, [switch]$FastBuild, [switch]$Focused, [string]$GdkRoot = '', [switch]$SkipGdk)
 $ErrorActionPreference = 'Stop'
 if ($Focused -and ($Play -or $Hardware -or $AuthorisedTarget -or $ProbeTrace -or $DependencyDlls.Count -gt 0)) { throw 'Focused mode cannot be combined with gameplay, hardware or external target checks. Use full validation.' }
 Set-Location $PSScriptRoot
@@ -10,19 +10,31 @@ Set-Content -LiteralPath $LogPath -Value ('Revenge validation ' + (Get-Date -For
 . (Join-Path $PSScriptRoot 'tools\ValidationLog.ps1')
 try {
     if ($Focused) { Write-RevengeLine '=== Build and focused graphics regression suite ===' } else { Write-RevengeLine '=== Build and full regression suite ===' }
-    & (Join-Path $PSScriptRoot 'Build-Revenge.ps1') -BuildJobs $BuildJobs -LogPath $LogPath -FastBuild:$FastBuild -Focused:$Focused
+    & (Join-Path $PSScriptRoot 'Build-Revenge.ps1') -BuildJobs $BuildJobs -LogPath $LogPath -FastBuild:$FastBuild -Focused:$Focused -GdkRoot $GdkRoot -SkipGdk:$SkipGdk -GpuTests
     $bin = Join-Path $PSScriptRoot 'build\Release'
     $rev = Join-Path $bin 'Revenge.exe'
+    Invoke-RevengeChecked $rev @('--version')
     $arena = Join-Path $bin 'RevengeArena.exe'
     $abi = Join-Path $bin 'revenge_abi.dll'
     $probe = Join-Path $bin 'RevengePlatformProbe.exe'
     $commands = Join-Path $bin 'revenge_abi_commands_fixture.exe'
-    Write-RevengeLine '=== Desktop D3D12 compressed texture sampling comparison ==='
-    Invoke-RevengeChecked $rev @('texture-sampling-gpu-test')
-    Write-RevengeLine '=== Desktop D3D12 render-pass comparison ==='
-    Invoke-RevengeChecked $rev @('render-pass-gpu-test')
+    Write-RevengeLine '=== Required desktop GPU regression group (four tests) ==='
+    Invoke-RevengeChecked ctest @('--test-dir', 'build', '-C', 'Release', '--verbose', '-L', '^desktop_gpu$', '--no-tests=error')
+    Write-RevengeLine '=== Public GDK API inventory and independent manual queue ==='
+    Invoke-RevengeChecked (Join-Path $bin 'revenge_manual_queue_tests.exe') @()
+    Invoke-RevengeChecked (Join-Path $bin 'revenge_scheduled_queue_tests.exe') @()
+    Invoke-RevengeChecked $rev @('gdk-api-registry')
+    $gdkEnabled = (Get-Content -LiteralPath (Join-Path $PSScriptRoot 'build\revenge-gdk-enabled.txt') -Raw).Trim()
+    if ($gdkEnabled -eq 'ON') {
+        $gdkRef = Join-Path $bin 'RevengeGdkReference.exe'
+        if (-not $Focused) { Invoke-RevengeChecked $gdkRef @() }
+        Write-RevengeLine '=== Public GDK reference executable offline diagnostics ==='
+        Invoke-RevengeChecked $rev @('target-plan', $gdkRef)
+        Invoke-RevengeChecked $rev @('gdk-import-plan', $gdkRef)
+        Invoke-RevengeChecked $rev @('import-plan', $gdkRef)
+    } else { Write-RevengeLine 'SKIP: Public GDK reference disabled or not detected; no SDK runtime validation.' }
     if ($Focused) {
-        Write-RevengeLine '=== Focused validation complete; full regression not run ==='
+        Write-RevengeLine '=== PASS: Focused validation complete; SKIP: full regression not run ==='
         return
     }
     $color = Join-Path $run 'color.rsp'

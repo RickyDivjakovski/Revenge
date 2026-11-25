@@ -4,6 +4,8 @@
 #include "revenge/scene.hpp"
 #include "revenge/resource_registry.hpp"
 #include <thread>
+#include <mutex>
+#include <memory>
 #include "revenge/texture.hpp"
 #include "revenge/texture_gpu_fixture.hpp"
 #include <cmath>
@@ -39,7 +41,7 @@ struct Handle {HANDLE h=CreateEventW(nullptr,FALSE,FALSE,nullptr);Handle(){if(!h
 const char* vendor(UINT id){switch(id){case 0x10de:return "NVIDIA";case 0x1002:return "AMD";case 0x8086:return "Intel";default:return "Other";}}
 struct Gpu {ComPtr<IDXGIAdapter1> adapter;ComPtr<ID3D12Device> device;DXGI_ADAPTER_DESC1 desc{};};
 Gpu select(){ComPtr<IDXGIFactory6> factory;check(CreateDXGIFactory2(0,IID_PPV_ARGS(&factory)),"CreateDXGIFactory2");for(UINT i=0;;++i){Gpu g;HRESULT h=factory->EnumAdapterByGpuPreference(i,DXGI_GPU_PREFERENCE_HIGH_PERFORMANCE,IID_PPV_ARGS(&g.adapter));if(h==DXGI_ERROR_NOT_FOUND)break;check(h,"EnumAdapterByGpuPreference");check(g.adapter->GetDesc1(&g.desc),"GetDesc1");if(g.desc.Flags&DXGI_ADAPTER_FLAG_SOFTWARE)continue;if(SUCCEEDED(D3D12CreateDevice(g.adapter.Get(),D3D_FEATURE_LEVEL_12_0,IID_PPV_ARGS(&g.device))))return g;}throw std::runtime_error("No hardware D3D12 FL12_0 adapter");}
-void print(const Gpu& g){std::wcout<<L"Adapter: "<<g.desc.Description<<L"\n";std::cout<<"Vendor: "<<vendor(g.desc.VendorId)<<"; dedicated VRAM MiB: "<<(g.desc.DedicatedVideoMemory/1048576)<<"\n";D3D12_FEATURE_DATA_ARCHITECTURE1 a{};if(SUCCEEDED(g.device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1,&a,sizeof(a))))std::cout<<"UMA: "<<a.UMA<<"; cache-coherent UMA: "<<a.CacheCoherentUMA<<"\n";D3D12_FEATURE_DATA_D3D12_OPTIONS o{};if(SUCCEEDED(g.device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS,&o,sizeof(o))))std::cout<<"Resource binding tier: "<<o.ResourceBindingTier<<"\n";D3D12_FEATURE_DATA_D3D12_OPTIONS5 ray{};if(SUCCEEDED(g.device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,&ray,sizeof(ray))))std::cout<<"DXR tier: "<<ray.RaytracingTier<<"\n";for(unsigned model: {0x66u,0x65u,0x64u,0x63u,0x62u,0x61u,0x60u,0x51u}){D3D12_FEATURE_DATA_SHADER_MODEL sm{static_cast<D3D_SHADER_MODEL>(model)};if(SUCCEEDED(g.device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL,&sm,sizeof(sm)))){std::cout<<"Shader model (queried up to 6.6): 0x"<<std::hex<<sm.HighestShaderModel<<std::dec<<"\n";break;}}ComPtr<IDXGIAdapter3> ad;if(SUCCEEDED(g.adapter.As(&ad))){DXGI_QUERY_VIDEO_MEMORY_INFO m{};if(SUCCEEDED(ad->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&m)))std::cout<<"Local memory budget MiB: "<<m.Budget/1048576<<"\n";}}
+void print(const Gpu& g){char adapter[512]{};WideCharToMultiByte(CP_UTF8,0,g.desc.Description,-1,adapter,sizeof(adapter),nullptr,nullptr);std::cout<<"Adapter: "<<adapter<<"\n";std::cout<<"Vendor: "<<vendor(g.desc.VendorId)<<"; dedicated VRAM MiB: "<<(g.desc.DedicatedVideoMemory/1048576)<<"\n";D3D12_FEATURE_DATA_ARCHITECTURE1 a{};if(SUCCEEDED(g.device->CheckFeatureSupport(D3D12_FEATURE_ARCHITECTURE1,&a,sizeof(a))))std::cout<<"UMA: "<<a.UMA<<"; cache-coherent UMA: "<<a.CacheCoherentUMA<<"\n";D3D12_FEATURE_DATA_D3D12_OPTIONS o{};if(SUCCEEDED(g.device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS,&o,sizeof(o))))std::cout<<"Resource binding tier: "<<o.ResourceBindingTier<<"\n";D3D12_FEATURE_DATA_D3D12_OPTIONS5 ray{};if(SUCCEEDED(g.device->CheckFeatureSupport(D3D12_FEATURE_D3D12_OPTIONS5,&ray,sizeof(ray))))std::cout<<"DXR tier: "<<ray.RaytracingTier<<"\n";for(unsigned model: {0x66u,0x65u,0x64u,0x63u,0x62u,0x61u,0x60u,0x51u}){D3D12_FEATURE_DATA_SHADER_MODEL sm{static_cast<D3D_SHADER_MODEL>(model)};if(SUCCEEDED(g.device->CheckFeatureSupport(D3D12_FEATURE_SHADER_MODEL,&sm,sizeof(sm)))){std::cout<<"Shader model (queried up to 6.6): 0x"<<std::hex<<sm.HighestShaderModel<<std::dec<<"\n";break;}}ComPtr<IDXGIAdapter3> ad;if(SUCCEEDED(g.adapter.As(&ad))){DXGI_QUERY_VIDEO_MEMORY_INFO m{};if(SUCCEEDED(ad->QueryVideoMemoryInfo(0,DXGI_MEMORY_SEGMENT_GROUP_LOCAL,&m)))std::cout<<"Local memory budget MiB: "<<m.Budget/1048576<<"\n";}}
 ComPtr<ID3D12Resource> buffer(ID3D12Device* d,uint64_t size,D3D12_HEAP_TYPE type,D3D12_RESOURCE_STATES state){D3D12_HEAP_PROPERTIES h{};h.Type=type;h.CreationNodeMask=h.VisibleNodeMask=1;D3D12_RESOURCE_DESC r{};r.Dimension=D3D12_RESOURCE_DIMENSION_BUFFER;r.Width=size;r.Height=1;r.DepthOrArraySize=1;r.MipLevels=1;r.SampleDesc.Count=1;r.Layout=D3D12_TEXTURE_LAYOUT_ROW_MAJOR;ComPtr<ID3D12Resource> p;check(d->CreateCommittedResource(&h,D3D12_HEAP_FLAG_NONE,&r,state,nullptr,IID_PPV_ARGS(&p)),"CreateCommittedResource");return p;}
 void wait(ID3D12Fence* f,uint64_t value,HANDLE event){auto completed=f->GetCompletedValue();if(completed==UINT64_MAX)throw std::runtime_error("GPU device removed");if(completed>=value)return;check(f->SetEventOnCompletion(value,event),"SetEventOnCompletion");if(WaitForSingleObject(event,30000)!=WAIT_OBJECT_0)throw std::runtime_error("GPU fence wait failed or timed out");completed=f->GetCompletedValue();if(completed==UINT64_MAX||completed<value)throw std::runtime_error("GPU did not complete fence");}
 }
@@ -638,8 +640,18 @@ int wave_gpu_test(unsigned width){auto expected=wave_fixture_expected(width);std
 #include "revenge/render_pass_fixture.hpp"
 #include <bit>
 namespace revenge::passes {
-int gpu_test(){
-    auto g=select();print(g);auto d=g.device.Get();
+namespace {
+struct PassContext {
+    Gpu g;
+    ComPtr<ID3D12RootSignature> root,root2;
+    ComPtr<ID3D12PipelineState> init,reject,mix,finish;
+    ComPtr<ID3D12CommandQueue> queue;
+    ComPtr<ID3D12Fence> fence;
+    Handle event;
+    uint64_t seq=0;
+    bool poisoned=false,in_flight=false;
+    explicit PassContext(bool trace):g(select()) {
+    if(trace)std::cerr<<"[pass] hardware device created"<<std::endl;auto d=g.device.Get();
     const char shader[]=R"(
 cbuffer DrawConstants : register(b0) { float z; uint mode; };
 float4 vs(uint id:SV_VertexID):SV_Position {
@@ -667,31 +679,109 @@ float4 compose(float4 p:SV_Position):SV_Target0 {
     // The draw pipelines need no SRV table. Use a separate signature for composition.
     D3D12_ROOT_SIGNATURE_DESC rd{};rd.NumParameters=1;rd.pParameters=rp;rd.Flags=D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
     auto root_make=[&](){ComPtr<ID3DBlob> sig,err;check(D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&sig,&err),"Pass root signature");ComPtr<ID3D12RootSignature> r;check(d->CreateRootSignature(0,sig->GetBufferPointer(),sig->GetBufferSize(),IID_PPV_ARGS(&r)),"Pass root");return r;};
-    auto root=root_make();rd.NumParameters=2;auto root2=root_make();
+    root=root_make();rd.NumParameters=2;root2=root_make();
     D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};p.pRootSignature=root.Get();p.VS={vs->GetBufferPointer(),vs->GetBufferSize()};p.PS={ps->GetBufferPointer(),ps->GetBufferSize()};p.SampleMask=UINT_MAX;p.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;p.RasterizerState.CullMode=D3D12_CULL_MODE_NONE;p.RasterizerState.DepthClipEnable=TRUE;p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;p.SampleDesc.Count=1;p.NumRenderTargets=2;p.RTVFormats[0]=p.RTVFormats[1]=DXGI_FORMAT_R8G8B8A8_UNORM;p.DSVFormat=DXGI_FORMAT_D24_UNORM_S8_UINT;
     p.BlendState.IndependentBlendEnable=TRUE;for(auto& t:p.BlendState.RenderTarget){t.SrcBlend=D3D12_BLEND_ONE;t.DestBlend=D3D12_BLEND_ZERO;t.BlendOp=D3D12_BLEND_OP_ADD;t.SrcBlendAlpha=D3D12_BLEND_ONE;t.DestBlendAlpha=D3D12_BLEND_ZERO;t.BlendOpAlpha=D3D12_BLEND_OP_ADD;t.LogicOp=D3D12_LOGIC_OP_NOOP;t.RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;}
     auto& ds=p.DepthStencilState;ds.DepthEnable=TRUE;ds.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ALL;ds.DepthFunc=D3D12_COMPARISON_FUNC_LESS;ds.StencilEnable=TRUE;ds.StencilReadMask=ds.StencilWriteMask=0xff;ds.FrontFace={D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_REPLACE,D3D12_COMPARISON_FUNC_ALWAYS};ds.BackFace=ds.FrontFace;
     auto make=[&](){ComPtr<ID3D12PipelineState> state;check(d->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&state)),"Pass graphics PSO");return state;};
-    auto init=make();ds.FrontFace.StencilPassOp=D3D12_STENCIL_OP_KEEP;ds.FrontFace.StencilFunc=D3D12_COMPARISON_FUNC_EQUAL;ds.BackFace=ds.FrontFace;auto reject=make();
-    auto& blend=p.BlendState.RenderTarget[0];blend.BlendEnable=TRUE;blend.SrcBlend=D3D12_BLEND_SRC_ALPHA;blend.DestBlend=D3D12_BLEND_INV_SRC_ALPHA;blend.DestBlendAlpha=D3D12_BLEND_INV_SRC_ALPHA;p.BlendState.RenderTarget[1].RenderTargetWriteMask=0;auto mix=make();
-    blend.BlendEnable=FALSE;ds.DepthEnable=FALSE;ds.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ZERO;ds.StencilEnable=FALSE;p.NumRenderTargets=1;p.RTVFormats[1]=DXGI_FORMAT_UNKNOWN;p.DSVFormat=DXGI_FORMAT_UNKNOWN;p.pRootSignature=root2.Get();p.PS={composite->GetBufferPointer(),composite->GetBufferSize()};auto finish=make();
+    init=make();ds.FrontFace.StencilPassOp=D3D12_STENCIL_OP_KEEP;ds.FrontFace.StencilFunc=D3D12_COMPARISON_FUNC_EQUAL;ds.BackFace=ds.FrontFace;reject=make();
+    auto& blend=p.BlendState.RenderTarget[0];blend.BlendEnable=TRUE;blend.SrcBlend=D3D12_BLEND_SRC_ALPHA;blend.DestBlend=D3D12_BLEND_INV_SRC_ALPHA;blend.DestBlendAlpha=D3D12_BLEND_INV_SRC_ALPHA;p.BlendState.RenderTarget[1].RenderTargetWriteMask=0;mix=make();
+    blend.BlendEnable=FALSE;ds.DepthEnable=FALSE;ds.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ZERO;ds.StencilEnable=FALSE;p.NumRenderTargets=1;p.RTVFormats[1]=DXGI_FORMAT_UNKNOWN;p.DSVFormat=DXGI_FORMAT_UNKNOWN;p.pRootSignature=root2.Get();p.PS={composite->GetBufferPointer(),composite->GetBufferSize()};finish=make();
+    D3D12_COMMAND_QUEUE_DESC qd{};qd.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;
+    check(d->CreateCommandQueue(&qd,IID_PPV_ARGS(&queue)),"Pass queue");
+    check(d->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence)),"Pass fence");
+    }
+};
+struct PassResources {
+    unsigned w=0,h=0;
+    ComPtr<ID3D12DescriptorHeap> rtv,dsv,srv;
+    std::array<ComPtr<ID3D12Resource>,3> colors,reads;
+    ComPtr<ID3D12Resource> depth;
+    std::array<D3D12_CPU_DESCRIPTOR_HANDLE,3> rt{};
+    D3D12_CPU_DESCRIPTOR_HANDLE dh{};
+    D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};
+    UINT64 size=0;
+    ComPtr<ID3D12CommandAllocator> alloc;
+    ComPtr<ID3D12GraphicsCommandList> list;
+};
+}
+struct PassCache {
+    std::mutex mutex;
+    std::unique_ptr<PassContext> context;
+    PassResources resources;
+    uint64_t calls=0,allocations=0,reuses=0;
+    bool trace;
+    explicit PassCache(bool diagnostics):trace(diagnostics){}
+    ~PassCache() noexcept {
+        if(!context)return;
+        bool clean=!context->poisoned;
+        // A failed fence wait may leave a submission outstanding. Attempt a bounded
+        // drain outside DLL detach; a removed device or another timeout is not success.
+        if(context->in_flight){
+            try{auto value=++context->seq;check(context->queue->Signal(context->fence.Get(),value),"Pass cleanup signal");wait(context->fence.Get(),value,context->event.h);context->in_flight=false;}
+            catch(const std::exception& e){std::cerr<<"[pass] cleanup drain failed: "<<e.what()<<std::endl;}
+            catch(...){std::cerr<<"[pass] cleanup drain failed"<<std::endl;}
+        }
+        resources=PassResources{};context.reset();
+        if(trace){std::cerr<<(clean?"[pass] GPU cache closed: calls=":"[pass] failed GPU cache closed: calls=")<<calls<<" allocations="<<allocations<<" reuses="<<reuses<<std::endl;}
+    }
+};
+std::shared_ptr<PassCache> create_pass_cache(){return std::make_shared<PassCache>(true);}
+Images render_gpu(PassCache& cache,unsigned w,unsigned h,std::span<const Draw> commands){
+    validate(w,h,commands);
+    std::lock_guard lock(cache.mutex);
+    if(!cache.context){if(cache.trace)std::cerr<<"[pass] selecting hardware and creating pipelines"<<std::endl;cache.context=std::make_unique<PassContext>(cache.trace);if(cache.trace)std::cerr<<"[pass] pipelines and queue ready"<<std::endl;else print(cache.context->g);}
+    auto& context=*cache.context;
+    if(context.poisoned||context.seq==UINT64_MAX-1)throw std::runtime_error("Pass context unavailable after GPU failure or sequence exhaustion");
+    auto d=context.g.device.Get();auto& root=context.root;auto& root2=context.root2;
+    auto& init=context.init;auto& reject=context.reject;auto& mix=context.mix;auto& finish=context.finish;
+    auto& queue=context.queue;auto& fence=context.fence;auto& event=context.event;
+    auto& r=cache.resources;
+    // A single size-keyed slot. Previous submissions have completed before this lock is released.
+    // New resources are built transactionally, then replace the old completed slot.
+    if(r.w!=w||r.h!=h){if(cache.trace)std::cerr<<"[pass] allocating slot "<<w<<"x"<<h<<std::endl;PassResources next;next.w=w;next.h=h;
     auto heap=[&](D3D12_DESCRIPTOR_HEAP_TYPE type,UINT count,bool visible){D3D12_DESCRIPTOR_HEAP_DESC h{};h.Type=type;h.NumDescriptors=count;h.Flags=visible?D3D12_DESCRIPTOR_HEAP_FLAG_SHADER_VISIBLE:D3D12_DESCRIPTOR_HEAP_FLAG_NONE;ComPtr<ID3D12DescriptorHeap> result;check(d->CreateDescriptorHeap(&h,IID_PPV_ARGS(&result)),"Pass descriptor heap");return result;};
-    auto rtv=heap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV,3,false),dsv=heap(D3D12_DESCRIPTOR_HEAP_TYPE_DSV,1,false),srv=heap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,2,true);
-    auto td=texture_desc(width,height,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);D3D12_CLEAR_VALUE clear{};clear.Format=td.Format;
-    std::array<ComPtr<ID3D12Resource>,3> colors;std::array<D3D12_CPU_DESCRIPTOR_HANDLE,3> rt{};auto sh=srv->GetCPUDescriptorHandleForHeapStart();
+    next.rtv=heap(D3D12_DESCRIPTOR_HEAP_TYPE_RTV,3,false);next.dsv=heap(D3D12_DESCRIPTOR_HEAP_TYPE_DSV,1,false);next.srv=heap(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,2,true);auto& rtv=next.rtv;auto& dsv=next.dsv;auto& srv=next.srv;
+    auto td=texture_desc(w,h,D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET);D3D12_CLEAR_VALUE clear{};clear.Format=td.Format;
+    auto& colors=next.colors;auto& rt=next.rt;auto sh=srv->GetCPUDescriptorHandleForHeapStart();
     for(unsigned i=0;i<3;++i){colors[i]=texture(d,td,D3D12_RESOURCE_STATE_RENDER_TARGET,&clear);rt[i]=rtv->GetCPUDescriptorHandleForHeapStart();rt[i].ptr+=SIZE_T(i)*d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);d->CreateRenderTargetView(colors[i].Get(),nullptr,rt[i]);if(i<2){D3D12_SHADER_RESOURCE_VIEW_DESC v{};v.Format=td.Format;v.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;v.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;v.Texture2D.MipLevels=1;d->CreateShaderResourceView(colors[i].Get(),&v,sh);sh.ptr+=d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);}}
-    auto dd=texture_desc(width,height,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;D3D12_CLEAR_VALUE dc{};dc.Format=dd.Format;dc.DepthStencil.Depth=1;auto depth=texture(d,dd,D3D12_RESOURCE_STATE_DEPTH_WRITE,&dc);auto dh=dsv->GetCPUDescriptorHandleForHeapStart();d->CreateDepthStencilView(depth.Get(),nullptr,dh);
-    D3D12_COMMAND_QUEUE_DESC qd{};qd.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;ComPtr<ID3D12CommandQueue> queue;check(d->CreateCommandQueue(&qd,IID_PPV_ARGS(&queue)),"Pass queue");ComPtr<ID3D12CommandAllocator> alloc;check(d->CreateCommandAllocator(qd.Type,IID_PPV_ARGS(&alloc)),"Pass allocator");ComPtr<ID3D12GraphicsCommandList> list;check(d->CreateCommandList(0,qd.Type,alloc.Get(),nullptr,IID_PPV_ARGS(&list)),"Pass list");
-    ComPtr<ID3D12Fence> fence;check(d->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence)),"Pass fence");Handle event;
-    for(auto h:rt)list->ClearRenderTargetView(h,clear.Color,0,nullptr);list->ClearDepthStencilView(dh,D3D12_CLEAR_FLAG_DEPTH|D3D12_CLEAR_FLAG_STENCIL,1,0,0,nullptr);
-    D3D12_VIEWPORT vp{0,0,float(width),float(height),0,1};list->RSSetViewports(1,&vp);list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);list->SetGraphicsRootSignature(root.Get());list->OMSetRenderTargets(2,rt.data(),FALSE,&dh);list->OMSetStencilRef(1);
-    ID3D12PipelineState* states[]={init.Get(),reject.Get(),mix.Get()};for(unsigned i=0;i<draws.size();++i){auto draw=draws[i];D3D12_RECT sc{LONG(draw.scissor.left),LONG(draw.scissor.top),LONG(draw.scissor.right),LONG(draw.scissor.bottom)};list->RSSetScissorRects(1,&sc);list->SetPipelineState(states[i]);const UINT c[]={std::bit_cast<UINT>(draw.depth),draw.mode,0,0};list->SetGraphicsRoot32BitConstants(0,4,c,0);list->DrawInstanced(3,1,0,0);}
+    auto dd=texture_desc(w,h,D3D12_RESOURCE_FLAG_ALLOW_DEPTH_STENCIL);dd.Format=DXGI_FORMAT_D24_UNORM_S8_UINT;D3D12_CLEAR_VALUE dc{};dc.Format=dd.Format;dc.DepthStencil.Depth=1;next.depth=texture(d,dd,D3D12_RESOURCE_STATE_DEPTH_WRITE,&dc);next.dh=dsv->GetCPUDescriptorHandleForHeapStart();d->CreateDepthStencilView(next.depth.Get(),nullptr,next.dh);
+    check(d->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT,IID_PPV_ARGS(&next.alloc)),"Pass allocator");
+    check(d->CreateCommandList(0,D3D12_COMMAND_LIST_TYPE_DIRECT,next.alloc.Get(),nullptr,IID_PPV_ARGS(&next.list)),"Pass list");check(next.list->Close(),"Close initial pass list");
+    UINT rows{};UINT64 rowbytes{};d->GetCopyableFootprints(&td,0,1,0,&next.fp,&rows,&rowbytes,&next.size);
+    if(rows!=h||rowbytes!=w*4||next.fp.Footprint.RowPitch<rowbytes)throw std::runtime_error("Pass footprint mismatch");
+    for(auto& read:next.reads)read=buffer(d,next.size,D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);
+    r=std::move(next);++cache.allocations;
+    }else ++cache.reuses;
+    auto& rt=r.rt;auto dh=r.dh;auto& srv=r.srv;auto& colors=r.colors;auto& reads=r.reads;auto& list=r.list;
+    auto& fp=r.fp;auto size=r.size;const float clear_color[4]={};
+    // Fail closed on recording/submission errors; retain resources until explicit cache teardown.
+    context.poisoned=true;
+    check(r.alloc->Reset(),"Reset pass allocator");check(list->Reset(r.alloc.Get(),nullptr),"Reset pass list");
+    for(auto h:rt)list->ClearRenderTargetView(h,clear_color,0,nullptr);list->ClearDepthStencilView(dh,D3D12_CLEAR_FLAG_DEPTH|D3D12_CLEAR_FLAG_STENCIL,1,0,0,nullptr);
+    D3D12_VIEWPORT vp{0,0,float(w),float(h),0,1};list->RSSetViewports(1,&vp);list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);list->SetGraphicsRootSignature(root.Get());list->OMSetRenderTargets(2,rt.data(),FALSE,&dh);list->OMSetStencilRef(1);
+    ID3D12PipelineState* states[]={init.Get(),reject.Get(),mix.Get()};for(const auto& draw:commands){D3D12_RECT sc{LONG(draw.scissor.left),LONG(draw.scissor.top),LONG(draw.scissor.right),LONG(draw.scissor.bottom)};list->RSSetScissorRects(1,&sc);list->SetPipelineState(states[draw.mode]);const UINT c[]={std::bit_cast<UINT>(draw.depth),draw.mode,0,0};list->SetGraphicsRoot32BitConstants(0,4,c,0);list->DrawInstanced(3,1,0,0);}
+    D3D12_RECT full_scissor{0,0,LONG(w),LONG(h)};list->RSSetScissorRects(1,&full_scissor);
     list->OMSetRenderTargets(1,&rt[2],FALSE,nullptr);for(unsigned i=0;i<2;++i)transition(list.Get(),colors[i].Get(),D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);
     ID3D12DescriptorHeap* heaps[]={srv.Get()};list->SetDescriptorHeaps(1,heaps);list->SetGraphicsRootSignature(root2.Get());const UINT compose_constants[]={std::bit_cast<UINT>(0.125f),0,0,0};list->SetGraphicsRoot32BitConstants(0,4,compose_constants,0);list->SetGraphicsRootDescriptorTable(1,srv->GetGPUDescriptorHandleForHeapStart());list->SetPipelineState(finish.Get());list->DrawInstanced(3,1,0,0);
-    D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};UINT rows{};UINT64 rowbytes{},size{};d->GetCopyableFootprints(&td,0,1,0,&fp,&rows,&rowbytes,&size);if(rows!=height||rowbytes!=width*4||fp.Footprint.RowPitch<rowbytes)throw std::runtime_error("Pass footprint mismatch");
-    std::array<ComPtr<ID3D12Resource>,3> reads;list->OMSetRenderTargets(0,nullptr,FALSE,nullptr);for(unsigned i=0;i<3;++i){transition(list.Get(),colors[i].Get(),i<2?D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE:D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE);reads[i]=buffer(d,size,D3D12_HEAP_TYPE_READBACK,D3D12_RESOURCE_STATE_COPY_DEST);D3D12_TEXTURE_COPY_LOCATION dst{},src{};dst.pResource=reads[i].Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;dst.PlacedFootprint=fp;src.pResource=colors[i].Get();src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;list->CopyTextureRegion(&dst,0,0,0,&src,nullptr);}
-    check(list->Close(),"Close pass list");ID3D12CommandList* lists[]={list.Get()};queue->ExecuteCommandLists(1,lists);check(queue->Signal(fence.Get(),1),"Pass signal");wait(fence.Get(),1,event.h);
-    auto expected=reference();unsigned worst=0;for(unsigned i=0;i<3;++i){void* mapped{};D3D12_RANGE rr{0,SIZE_T(size)},empty{0,0};check(reads[i]->Map(0,&rr,&mapped),"Map pass readback");auto bytes=static_cast<const uint8_t*>(mapped);for(unsigned y=0;y<height;++y)for(unsigned x=0;x<width;++x)for(unsigned c=0;c<4;++c){auto actual=bytes[fp.Offset+uint64_t(y)*fp.Footprint.RowPitch+x*4+c];auto target=expected[i][y*width+x][c];worst=std::max(worst,unsigned(std::abs(int(actual)-int(target))));}reads[i]->Unmap(0,&empty);}
-    if(worst>1)throw std::runtime_error("Render pass GPU oracle mismatch: max byte error "+std::to_string(worst));std::cout<<"Desktop render passes: 768 pixels verified, two MRTs, depth/stencil, scissor, independent blending, render-to-texture, two SRVs, root constants and four PSOs; max byte error "<<worst<<". Desktop D3D12 only.\n";return 0;
+    list->OMSetRenderTargets(0,nullptr,FALSE,nullptr);for(unsigned i=0;i<3;++i){transition(list.Get(),colors[i].Get(),i<2?D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE:D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COPY_SOURCE);D3D12_TEXTURE_COPY_LOCATION dst{},src{};dst.pResource=reads[i].Get();dst.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;dst.PlacedFootprint=fp;src.pResource=colors[i].Get();src.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;list->CopyTextureRegion(&dst,0,0,0,&src,nullptr);transition(list.Get(),colors[i].Get(),D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_RENDER_TARGET);}
+    check(list->Close(),"Close pass list");ID3D12CommandList* lists[]={list.Get()};if(cache.trace)std::cerr<<"[pass] submitting "<<w<<"x"<<h<<std::endl;context.in_flight=true;queue->ExecuteCommandLists(1,lists);const auto value=++context.seq;check(queue->Signal(fence.Get(),value),"Pass signal");wait(fence.Get(),value,event.h);context.in_flight=false;if(cache.trace)std::cerr<<"[pass] fence complete "<<value<<std::endl;
+    Images actual;for(auto& image:actual)image.resize(size_t(w)*h);
+    for(unsigned i=0;i<3;++i){void* mapped{};D3D12_RANGE rr{0,SIZE_T(size)},empty{0,0};check(reads[i]->Map(0,&rr,&mapped),"Map pass readback");auto bytes=static_cast<const uint8_t*>(mapped);for(unsigned y=0;y<h;++y)std::memcpy(actual[i].data()+size_t(y)*w,bytes+fp.Offset+uint64_t(y)*fp.Footprint.RowPitch,size_t(w)*4);reads[i]->Unmap(0,&empty);}
+    context.poisoned=false;++cache.calls;if(cache.trace)std::cerr<<"[pass] readback complete"<<std::endl;
+    return actual;
+}
+int gpu_test(){
+    PassCache cache(false);auto actual=render_gpu(cache,width,height,draws),expected=reference();unsigned worst=0;
+    for(unsigned i=0;i<3;++i)for(size_t j=0;j<actual[i].size();++j)for(unsigned c=0;c<4;++c)worst=std::max(worst,unsigned(std::abs(int(actual[i][j][c])-int(expected[i][j][c]))));
+    if(worst>1)throw std::runtime_error("Render pass GPU oracle mismatch: max byte error "+std::to_string(worst));
+    // Fixed-size repeats followed by a size change and another repeat. Compare every output.
+    uint64_t start_alloc=0,start_reuse=0;{std::lock_guard lock(cache.mutex);start_alloc=cache.allocations;start_reuse=cache.reuses;}
+    auto start=std::chrono::steady_clock::now();unsigned checked=0;
+    for(unsigned i=0;i<24;++i){unsigned w=i<16?width:24,h=height;std::array<Draw,3> work=draws;work[0].scissor.right=8+i%6;work[1].scissor.right=work[2].scissor.right=w;
+        auto got=render_gpu(cache,w,h,work),want=reference(w,h,work);for(unsigned k=0;k<3;++k)for(size_t j=0;j<got[k].size();++j)for(unsigned c=0;c<4;++c)if(std::abs(int(got[k][j][c])-int(want[k][j][c]))>1)throw std::runtime_error("Persistent pass oracle mismatch");checked+=3*w*h;}
+    auto ms=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();
+    {std::lock_guard lock(cache.mutex);auto allocations=cache.allocations-start_alloc,reuses=cache.reuses-start_reuse;if(allocations!=1||reuses!=23)throw std::runtime_error("Persistent pass reuse count mismatch");std::cout<<"Persistent pass: 24 workloads, "<<checked<<" pixels; one size change, "<<reuses<<" slot reuses, "<<ms<<" ms (CPU oracle included), one device/queue/fence and four fixed PSOs. Not game FPS.\n";}
+std::cout<<"Desktop render passes: 768 pixels verified, two MRTs, depth/stencil, scissor, independent blending, render-to-texture, two SRVs, root constants and four PSOs; max byte error "<<worst<<". Desktop D3D12 only.\n";return 0;
 }
 }
