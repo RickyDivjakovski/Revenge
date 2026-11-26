@@ -2,7 +2,7 @@
 #include "revenge/core.hpp"
 namespace revenge {
 // Non-executable, in-memory PE layout for research. Never invokes target code.
-struct ImportSlot {std::string dll, symbol; uint32_t rva;};
+struct ImportSlot {std::string dll, symbol; uint32_t rva;bool by_ordinal{};};
 struct LoadPlan {
  Image image;
  uint64_t mapped_base{};

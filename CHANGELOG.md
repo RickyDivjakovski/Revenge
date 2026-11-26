@@ -2,6 +2,34 @@
 
 Historical release notes, newest first. Historical test counts and planned features describe their respective releases; see [README.md](README.md) for current capabilities.
 
+## v0.68.0 — transitive dependency diagnostics
+
+- Add explicit-inventory transitive named/ordinal export auditing, forwarder traversal, missing dependencies, cycle diagnostics and bounded input.
+- Include dependency graph, export chain and new audit tests in focused validation. No addresses bound or external code executed.
+
+## v0.67.0 — integrated fixed loader lifecycle
+
+- Extend the existing independently authored PE fixture with TLS metadata, six relocations, a typed native callback and eight worker reference TLS instances.
+- Integrate native image preparation, import binding, final page protection, Windows unwind registration, callback lifecycle, entry execution and cleanup in one regression, including a worker failure injection and illegal callback transitions.
+- Guest static TLS installation and arbitrary external image execution remain unsupported. Graphics unchanged.
+
+## v0.66.0 — controlled Windows launch and integer stage translation
+
+- Add six integer VOP2 operations to the graphics stage decoder, CPU evaluator and HLSL emitter, with eight reference cases and an unsigned minimum GPU fixture.
+- Include normal and diagnostic launches of the independently built Windows runtime fixture in focused validation. Expand the runtime reference to eight workers, static TLS template checks, exception handling, and MSVC x64 loader TLS callback counters. Windows OS loader only; not a guest Xbox loader.
+
+## v0.65.0 — runtime mapping and shader expansion
+
+- Extend graphics stage translation with six bitwise and shift VOP2 operations, raw-bit HLSL lowering and reference evaluation.
+- Add stage CPU regression to focused validation and a resident GPU mask fixture. General console shader translation remains unsupported.
+- Exercise OS-backed data-only large-image mapping; no arbitrary target execution. Host dynamic TLS slots exercised with independent template instances; guest static TLS and callback invocation remain unsupported.
+
+## v0.64.0 — controlled runtime validation
+
+- Exercise a synthetic 192 MiB image with 614,400 DIR64 relocations per rebase, both directions, zero-fill and malformed duplicate rejection.
+- Preserve named versus ordinal import identity in the offline plan and reject ordinal substitution in the fixed typed binder.
+- Include existing export and TLS model fixtures in focused validation. No general target launch or OS TLS installation.
+
 ## v0.63.0 — executable compatibility diagnostics
 
 - Consolidate entry-point, page layout, imports, delay imports, TLS, unwind and GDK inventory in one offline report.

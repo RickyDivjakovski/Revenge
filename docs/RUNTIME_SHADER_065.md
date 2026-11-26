@@ -1,0 +1,7 @@
+# v0.65.0 — controlled runtime and stage translation
+
+The large-image fixture now allocates 192 MiB through VirtualAlloc or mmap, rebases its independently generated image to the actual allocation address, verifies 614,400 relocated pointers, then applies read/write/no-access protections. No pages are executable. Windows additionally checks protection with VirtualQuery. The host TLS fixture uses TlsAlloc/TlsSetValue or pthread keys, with eight worker threads and independently instantiated template data. This does not install static PE TLS, invoke guest callbacks, or initialise arbitrary images.
+
+The graphics stage decoder accepts the same six VOP2 bitwise/shift opcode encodings already used in the independent compute fixture: 22 lshrrev, 26 lshlrev, 27 and, 28 or, 29 xor, 30 xnor. HLSL lowering uses asuint/asfloat, unsigned literals and masked 5-bit shift counts. The reference evaluator uses uint32_t bit representations. Known-answer coverage uses finite float inputs and outputs; arbitrary NaN payload, denormal, wave, special-register, descriptor and shader ABI behaviour is not established. Unsupported encodings still fail closed. No general RDNA2 binary translation claim is made.
+
+The resident hardware fixture adds an AND-zero mask to the translated pixel stage, testing 405 pixels on two target sizes. The existing pipeline, batch and asynchronous tests remain. Hardware validation is required on Windows. Focused validation now includes the two existing stage CPU fixtures.

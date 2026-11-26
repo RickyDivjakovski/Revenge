@@ -7,6 +7,8 @@
 #include <iostream>
 #include <stdexcept>
 #include <vector>
+#include <thread>
+#include <exception>
 #if defined(_WIN32)
 #ifndef NOMINMAX
 #define NOMINMAX
@@ -20,17 +22,18 @@ namespace {
 using namespace revenge;
 constexpr uint64_t preferred=0x140000000ull;
 constexpr size_t extent=0x5000;
+constexpr unsigned process_attach=1,thread_attach=2,thread_detach=3,process_detach=0;
 constexpr uint32_t import_entry=0x1040, import_slot=0x2040;
 unsigned fixture_answer() noexcept {return 0x5256u;}
 void check(bool ok,const char* why){if(!ok)throw std::runtime_error(why);}
 void put(std::vector<uint8_t>& b,size_t p,uint64_t v,unsigned n){for(unsigned i=0;i<n;++i)b.at(p+i)=static_cast<uint8_t>(v>>(8*i));}
 // Typed, fixed fixture binder. Validate complete plan before mutating any bytes.
 using HostAnswer=unsigned(*)() noexcept;
-void bind_fixture(LoadPlan& plan){
+void bind_fixture(LoadPlan& plan,bool lifecycle=false){
  check(plan.slots.size()==1&&plan.mapped.size()==extent,"unexpected fixture import count or extent");
- check(!plan.delay_imports&&!plan.load_config&&!plan.image.tls,"unsupported fixture initialisation");
+ check(!plan.delay_imports&&!plan.load_config&&plan.image.tls==lifecycle,"unsupported fixture initialisation");
  const auto& slot=plan.slots.front();
- check(slot.dll=="rv_fixture_host.dll"&&slot.symbol=="rv_fixture_answer"&&slot.rva==import_slot,"unknown fixture import");
+ check(slot.dll=="rv_fixture_host.dll"&&slot.symbol=="rv_fixture_answer"&&slot.rva==import_slot&&!slot.by_ordinal,"unknown fixture import");
  const HostAnswer answer=&fixture_answer;
  put(plan.mapped,import_slot,reinterpret_cast<uintptr_t>(answer),8);
 }
@@ -62,6 +65,28 @@ std::vector<uint8_t> fixture(){
  put(b,0x680,import_entry,4);put(b,0x684,import_entry+import_code.size(),4);put(b,0x688,0x4090,4);
  put(b,0x690,1,1);put(b,0x691,8,1);put(b,0x692,1,1);put(b,0x694,8,1);put(b,0x695,0x42,1);return b;
 }
+// A second, independently authored fixture adds one static TLS descriptor and
+// a callback with no dependencies. Guest TLS storage is an explicit reference
+// model, not a replacement for the host's static TLS vector.
+std::vector<uint8_t> lifecycle_fixture(){
+ auto b=fixture();constexpr size_t o=0x98;
+ put(b,o+184,0x21a0,4);put(b,o+188,40,4);put(b,o+116+5*8,32,4);
+ put(b,0x5a0,preferred+0x21d0,8);put(b,0x5a8,preferred+0x21d4,8);
+ put(b,0x5b0,preferred+0x2010,8);put(b,0x5b8,preferred+0x21e0,8);
+ put(b,0x5c0,12,4);put(b,0x5c4,0x500000,4);put(b,0x5d0,0x12345678,4);
+ put(b,0x5e0,preferred+0x1080,8);
+ put(b,0x60c,0x2000,4);put(b,0x610,20,4);
+ unsigned i=0;for(unsigned off:{0x1a0u,0x1a8u,0x1b0u,0x1b8u,0x1e0u})put(b,0x614+2*i++,0xa000|off,2);
+ // Callback records the host ABI reason and increments its invocation count.
+ constexpr std::array<uint8_t,20> callback={0xf3,0x0f,0x1e,0xfa,
+#ifdef _WIN32
+  0x89,0xd0,
+#else
+  0x89,0xf0,
+#endif
+  0x89,0x05,0x88,0x0f,0,0,0xf0,0xff,0x05,0x85,0x0f,0,0,0xc3};
+ std::copy(callback.begin(),callback.end(),b.begin()+0x280);return b;
+}
 #if (defined(_WIN32) && (defined(_M_X64)||defined(__x86_64__))) || (defined(__linux__) && defined(__x86_64__))
 struct Mapping {
  uint8_t* p=nullptr;void* reservation=nullptr;size_t reserved=extent;
@@ -89,18 +114,21 @@ struct Mapping {
  int next=((flags&1)?PROT_READ:0)|((flags&2)?PROT_WRITE:0)|((flags&4)?PROT_EXEC:0);check(mprotect(p+rva,size,next)==0,"mprotect failed");
 #endif
  }
- void prepare(){auto bytes=fixture();auto plan=prepare_image(bytes,reinterpret_cast<uintptr_t>(p));
- check(plan.relocations==1&&plan.slots.size()==1&&!plan.image.tls&&plan.image.unwind&&plan.unwind_entries==1&&!plan.delay_imports&&!plan.load_config,"unexpected fixed fixture metadata");
+ TlsTemplate prepare(bool lifecycle=false){auto bytes=lifecycle?lifecycle_fixture():fixture();auto plan=prepare_image(bytes,reinterpret_cast<uintptr_t>(p));
+ check(plan.relocations==(lifecycle?6u:1u)&&plan.slots.size()==1&&plan.image.tls==lifecycle&&plan.image.unwind&&plan.unwind_entries==1&&!plan.delay_imports&&!plan.load_config,"unexpected fixed fixture metadata");
  check(init_metadata_report(plan).find("maximum local stack adjustment=40")!=std::string::npos,"fixed unwind metadata mismatch");
  check(page_layout(plan)==std::vector<PageSpan>{{0,4096,9},{4096,4096,13},{8192,4096,11},{12288,4096,0},{16384,4096,9}},"fixture page layout mismatch");
  check(std::all_of(plan.mapped.begin()+0x2200,plan.mapped.begin()+0x3000,[](uint8_t v){return v==0;}),"zero-fill mismatch");
- bind_fixture(plan);
+ auto tls=tls_template(plan);
+ if(lifecycle){check(tls.present&&tls.initial==std::vector<uint8_t>{0x78,0x56,0x34,0x12}&&tls.zero_fill==12&&tls.alignment==16&&tls.index_rva==0x2010&&plan.tls_callbacks==1,"unexpected TLS metadata");put(plan.mapped,tls.index_rva,1,4);}
+ bind_fixture(plan,lifecycle);
  std::memcpy(p,plan.mapped.data(),extent);for(auto span:page_layout(plan))protect(span.rva,span.bytes,span.flags);
 #ifdef _WIN32
  check(FlushInstructionCache(GetCurrentProcess(),p+0x1000,4096)!=0,"instruction cache flush failed");
 #else
  __builtin___clear_cache(reinterpret_cast<char*>(p+0x1000),reinterpret_cast<char*>(p+0x2000));
 #endif
+ return tls;
  }
  unsigned invoke(){using Entry=unsigned(*)();return reinterpret_cast<Entry>(p+0x1000)();}
  unsigned invoke_import(){using Entry=unsigned(*)();return reinterpret_cast<Entry>(p+import_entry)();}
@@ -120,14 +148,52 @@ struct Mapping {
   check(RtlDeleteFunctionTable(table)!=0,"fixed unwind deregistration failed");registration.table=nullptr;
  }
 #endif
-};
+ };
+void integrated_lifecycle(bool inject_failure=false){
+ Mapping m;const auto t=m.prepare(true);
+#ifdef _WIN32
+ auto* table=reinterpret_cast<PRUNTIME_FUNCTION>(m.p+0x4080);
+ auto base=static_cast<DWORD64>(reinterpret_cast<uintptr_t>(m.p));
+ check(RtlAddFunctionTable(table,1,base)!=0,"lifecycle unwind registration");
+ struct Registration{PRUNTIME_FUNCTION table;~Registration(){if(table)RtlDeleteFunctionTable(table);}} reg{table};
+ DWORD64 found=0;check(RtlLookupFunctionEntry(base+import_entry+8,&found,nullptr)==table&&found==base,"lifecycle unwind lookup");
+#endif
+ auto read32=[&](size_t r){uint32_t v;std::memcpy(&v,m.p+r,4);return v;};
+ uintptr_t target=0,terminator=1;std::memcpy(&target,m.p+0x21e0,8);std::memcpy(&terminator,m.p+0x21e8,8);check(target==reinterpret_cast<uintptr_t>(m.p+0x1080)&&terminator==0,"relocated fixed callback table");
+ unsigned events=0;bool process_live=false,thread_live=false;
+ auto callback=[&](unsigned reason){
+  switch(reason){case process_attach:check(!process_live&&!events,"duplicate process attach");process_live=true;break;case thread_attach:check(process_live&&!thread_live,"invalid thread attach");thread_live=true;break;case thread_detach:check(process_live&&thread_live,"invalid thread detach");thread_live=false;break;case process_detach:check(process_live&&!thread_live,"invalid process detach");process_live=false;break;default:throw std::runtime_error("invalid callback reason");}
+  using Callback=void(*)(void*,unsigned,void*);reinterpret_cast<Callback>(target)(m.p,reason,nullptr);++events;check(read32(0x2014)==reason&&read32(0x2018)==events,"callback order or count");
+ };
+ unsigned rejected=0;auto reject=[&](unsigned reason){auto before=events;try{callback(reason);}catch(const std::runtime_error&){check(events==before,"invalid callback mutated state");++rejected;return;}throw std::runtime_error("accepted invalid callback order");};
+ reject(thread_attach);reject(process_detach);reject(99);
+ alignas(16) std::array<uint8_t,16> parent{};auto initial=tls_instance(t);check(initial.size()==parent.size(),"initial TLS size");std::copy(initial.begin(),initial.end(),parent.begin());check(parent[0]==0x78&&parent[15]==0&&read32(0x2010)==1,"initial TLS reference");
+ callback(process_attach);reject(process_attach);reject(thread_detach);check(m.invoke()==42&&m.invoke_import()==0x5256u,"lifecycle entry/import");
+ unsigned failures=0;
+ for(unsigned i=0;i<8;++i){std::exception_ptr failure;std::thread worker([&]{try{
+   alignas(16) std::array<uint8_t,16> storage{};auto instance=tls_instance(t);std::copy(instance.begin(),instance.end(),storage.begin());
+   check(storage[0]==0x78&&storage[15]==0,"worker TLS template");callback(thread_attach);try{storage[0]=uint8_t(i);storage[15]=0xff;
+   check(m.invoke_import()==0x5256u&&storage[0]==i&&parent[0]==0x78&&parent[15]==0,"worker isolation/import");
+   if(inject_failure&&i==3)throw std::logic_error("injected worker failure");
+   }catch(...){callback(thread_detach);throw;}callback(thread_detach);
+  }catch(...){failure=std::current_exception();}});worker.join();if(failure){try{std::rethrow_exception(failure);}catch(const std::logic_error& e){if(!inject_failure||i!=3||std::string(e.what())!="injected worker failure")throw;++failures;}}}
+ check(failures==(inject_failure?1u:0u)&&m.invoke()==43&&parent[0]==0x78&&parent[15]==0,"lifecycle final state");
+ callback(process_detach);reject(thread_attach);reject(process_detach);check(events==18&&rejected==7&&!process_live&&!thread_live,"lifecycle termination state");
+#ifdef _WIN32
+ check(RtlDeleteFunctionTable(table)!=0,"lifecycle unwind deregistration");reg.table=nullptr;
+ found=0;check(RtlLookupFunctionEntry(base+import_entry+8,&found,nullptr)==nullptr,"lifecycle stale unwind registration");
+#endif
+ if(inject_failure)std::cout<<"Integrated fixed image lifecycle: injected worker failure cleaned up; 7 invalid callback transitions rejected.\n";
+ else std::cout<<"Integrated fixed image lifecycle: 6 relocations, typed import, 8 worker reference TLS instances, 18 native callbacks, entry and cleanup passed. No guest static TLS installation or external target execution.\n";
+}
 #endif
 }
 int main(){try{
 #if (defined(_WIN32) && (defined(_M_X64)||defined(__x86_64__))) || (defined(__linux__) && defined(__x86_64__))
  auto baseline=prepare_image(fixture(),preferred);unsigned rejected=0;
- for(unsigned variant=0;variant<8;++variant){auto bad=baseline;switch(variant){case 0:bad.slots[0].dll="wrong.dll";break;case 1:bad.slots[0].symbol="wrong";break;case 2:bad.slots[0].rva+=8;break;case 3:bad.slots.push_back(bad.slots[0]);break;case 4:bad.slots.clear();break;case 5:bad.delay_imports=true;break;case 6:bad.image.tls=true;break;case 7:bad.load_config=true;break;}auto before=bad.mapped;bool failed=false;try{bind_fixture(bad);}catch(const std::runtime_error&){failed=true;}check(failed&&before==bad.mapped,"invalid fixture binding modified image");++rejected;}
+ for(unsigned variant=0;variant<9;++variant){auto bad=baseline;switch(variant){case 0:bad.slots[0].dll="wrong.dll";break;case 1:bad.slots[0].symbol="wrong";break;case 2:bad.slots[0].rva+=8;break;case 3:bad.slots.push_back(bad.slots[0]);break;case 4:bad.slots.clear();break;case 5:bad.delay_imports=true;break;case 6:bad.image.tls=true;break;case 7:bad.load_config=true;break;case 8:bad.slots[0].by_ordinal=true;break;}auto before=bad.mapped;bool failed=false;try{bind_fixture(bad);}catch(const std::runtime_error&){failed=true;}check(failed&&before==bad.mapped,"invalid fixture binding modified image");++rejected;}
  std::cout<<"Fixed typed binding: "<<rejected<<" malformed plans rejected without mutation.\n";
+ integrated_lifecycle();integrated_lifecycle(true);
  Mapping a,b;a.prepare();b.prepare();check(a.p!=b.p,"mapping isolation");check(a.invoke()==42&&a.invoke()==43&&b.invoke()==42&&a.invoke()==44&&b.invoke()==43,"relocated entry results");check(a.invoke_import()==0x5256u&&b.invoke_import()==0x5256u,"fixed host import call results");
  #ifdef _WIN32
  a.verify_unwind();b.verify_unwind();std::cout<<"Fixed native unwind: two registered tables, lookup, virtual stack recovery, wrapper calls and deregistration passed.\n";

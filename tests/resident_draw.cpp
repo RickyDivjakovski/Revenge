@@ -49,12 +49,14 @@ int main(int argc,char** argv){try{
  // Alternate translated programs, including a vertex program that halves clip-space X.
  for(size_t k=0;k<n;k+=4){input[k]=17;input[k+1]=61;input[k+2]=113;input[k+3]=255;}
  call(RV_GPU_UPLOAD,x,n,0,0,input.data(),n);
- for(unsigned variant:{0u,1u,2u,0u}){
+ for(unsigned variant:{0u,1u,2u,3u,4u,0u}){
   auto packet=program;if(variant==1)packet.pixel[5]=0x07060504u;
   if(variant==2){std::move_backward(packet.vertex,packet.vertex+packet.vertex_count,packet.vertex+packet.vertex_count+2);packet.vertex[0]=0x100000ffu;packet.vertex[1]=0x3f000000u;packet.vertex_count+=2;}
+  if(variant==3){std::move_backward(packet.pixel+4,packet.pixel+packet.pixel_count,packet.pixel+packet.pixel_count+2);packet.pixel[4]=(27u<<25)|(6u<<17)|(6u<<9)|255u;packet.pixel[5]=0;packet.pixel_count+=2;}
+  if(variant==4){std::move_backward(packet.pixel+4,packet.pixel+packet.pixel_count,packet.pixel+packet.pixel_count+2);packet.pixel[4]=(19u<<25)|(6u<<17)|(6u<<9)|255u;packet.pixel[5]=0x3e800000u;packet.pixel_count+=2;}
   if(variant==0){check(call(RV_GPU_DRAW_PIPELINE,t,6,v,i,&handle,sizeof(handle),RV_OK,x)==6);call(RV_GPU_DRAW_PIPELINE,t,6,v,i,&alias,sizeof(alias),RV_INVALID,x);}else check(call(RV_GPU_DRAW_PROGRAM,t,6,v,i,&packet,sizeof(packet),RV_OK,x)==6);call(RV_GPU_READ,t,n,0,0,output.data(),n);
   for(unsigned yy=0;yy<h;++yy)for(unsigned xx=0;xx<w;++xx){bool inside=variant!=2||(float(xx)+0.5f>float(w)*0.25f&&float(xx)+0.5f<float(w)*0.75f);size_t at=(yy*w+xx)*4;
-   const std::array<uint8_t,4> expected=inside?(variant==1?std::array<uint8_t,4>{17,61,113,255}:std::array<uint8_t,4>{113,61,17,255}):std::array<uint8_t,4>{0,0,0,0};
+   const std::array<uint8_t,4> expected=inside?(variant==1?std::array<uint8_t,4>{17,61,113,255}:variant==3?std::array<uint8_t,4>{0,61,17,255}:variant==4?std::array<uint8_t,4>{64,61,17,255}:std::array<uint8_t,4>{113,61,17,255}):std::array<uint8_t,4>{0,0,0,0};
    for(unsigned c=0;c<4;++c)check(output[at+c]==expected[c]);}program_pixels+=w*h;
  }
  // Two translated swizzles restore the original color, with distinct descriptor slots.
@@ -81,12 +83,12 @@ int main(int argc,char** argv){try{
  rv_session* foreign_raw=nullptr;check(rv_open(RV_ABI_VERSION,&foreign_raw)==RV_OK);std::unique_ptr<rv_session,decltype(&rv_close)> foreign_owner(foreign_raw,rv_close);
  rv_request ticket_request{sizeof(rv_request),RV_ABI_VERSION,RV_GPU_BATCH_POLL,0,ticket,0,0,0,0};uint64_t ticket_result=99;check(rv_dispatch(foreign_owner.get(),&ticket_request,nullptr,0,&ticket_result)==RV_INVALID&&ticket_result==0);
  call(RV_GPU_BATCH_RELEASE,ticket);call(RV_GPU_BATCH_POLL,ticket,0,0,0,nullptr,0,RV_INVALID);
- check(call(RV_GPU_PROGRAM_COUNT)==3);call(RV_GPU_RELEASE,x);call(RV_GPU_RELEASE,t);call(RV_GPU_DRAW_INDEXED,t,6,v,i,nullptr,0,RV_INVALID,x);}
- call(RV_GPU_PROGRAM_RELEASE,handle);check(call(RV_GPU_PROGRAM_HANDLES)==0);check(call(RV_GPU_PROGRAM_COUNT)==3);check(call(RV_GPU_PROGRAM_CLEAR)==3);check(call(RV_GPU_PROGRAM_COUNT)==0);auto final_handle=call(RV_GPU_PROGRAM_CREATE,0,0,0,0,&program,sizeof(program));check(final_handle!=handle);check(call(RV_GPU_PROGRAM_COUNT)==1);check(call(RV_GPU_PROGRAM_HANDLES)==1);call(RV_GPU_RELEASE,v);call(RV_GPU_RELEASE,i);check(call(RV_GPU_USAGE)==0);
+ check(call(RV_GPU_PROGRAM_COUNT)==5);call(RV_GPU_RELEASE,x);call(RV_GPU_RELEASE,t);call(RV_GPU_DRAW_INDEXED,t,6,v,i,nullptr,0,RV_INVALID,x);}
+ call(RV_GPU_PROGRAM_RELEASE,handle);check(call(RV_GPU_PROGRAM_HANDLES)==0);check(call(RV_GPU_PROGRAM_COUNT)==5);check(call(RV_GPU_PROGRAM_CLEAR)==5);check(call(RV_GPU_PROGRAM_COUNT)==0);auto final_handle=call(RV_GPU_PROGRAM_CREATE,0,0,0,0,&program,sizeof(program));check(final_handle!=handle);check(call(RV_GPU_PROGRAM_COUNT)==1);check(call(RV_GPU_PROGRAM_HANDLES)==1);call(RV_GPU_RELEASE,v);call(RV_GPU_RELEASE,i);check(call(RV_GPU_USAGE)==0);
  // Stop with a retained, unobserved submission: teardown must drain the fence.
  v=call(RV_GPU_ALLOC,0,sizeof(vertices));i=call(RV_GPU_ALLOC,0,sizeof(indices));
  call(RV_GPU_UPLOAD,v,sizeof(vertices),0,0,vertices.data(),sizeof(vertices));call(RV_GPU_UPLOAD,i,sizeof(indices),0,0,indices.data(),sizeof(indices));
  std::array<uint8_t,4> pixel{17,61,113,255};auto stop_src=call(RV_GPU_ALLOC,0,4,1,1),stop_dst=call(RV_GPU_ALLOC,0,4,1,1);
  call(RV_GPU_UPLOAD,stop_src,4,0,0,pixel.data(),pixel.size());rv_gpu_batch_draw stop_draw{stop_dst,stop_src,v,i,final_handle,6,0};
- auto stop_ticket=call(RV_GPU_BATCH_SUBMIT,0,1,0,0,&stop_draw,sizeof(stop_draw));check(stop_ticket!=0);call(RV_STOP);check(call(RV_GPU_USAGE)==0);call(RV_GPU_BATCH_POLL,stop_ticket,0,0,0,nullptr,0,RV_INVALID);check(call(RV_GPU_PROGRAM_COUNT)==0);check(call(RV_GPU_PROGRAM_HANDLES)==0);std::cout<<"Resident indexed drawing: "<<pixels<<" pixels verified, 24 full-target draws plus two partial draws, persistent vertex/index/texture bindings, ping-pong targets, ten extended draws and cleanup passed; translated stage draws: "<<program_pixels<<" pixels verified; resident batches: 8 draws in 2 submissions verified; async resident batches: 8 draws, 2 tickets verified; pending stop drain passed\n";return 0;
+ auto stop_ticket=call(RV_GPU_BATCH_SUBMIT,0,1,0,0,&stop_draw,sizeof(stop_draw));check(stop_ticket!=0);call(RV_STOP);check(call(RV_GPU_USAGE)==0);call(RV_GPU_BATCH_POLL,stop_ticket,0,0,0,nullptr,0,RV_INVALID);check(call(RV_GPU_PROGRAM_COUNT)==0);check(call(RV_GPU_PROGRAM_HANDLES)==0);std::cout<<"Resident indexed drawing: "<<pixels<<" pixels verified, 24 full-target draws plus two partial draws, persistent vertex/index/texture bindings, ping-pong targets, ten extended draws and cleanup passed; translated stage draws: "<<program_pixels<<" pixels verified; resident batches: 8 draws in 2 submissions verified; async resident batches: 8 draws, 2 tickets verified; pending stop drain passed; stage bitwise mask: 405 pixels verified; stage integer min: 405 pixels verified\n";return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

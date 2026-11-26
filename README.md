@@ -6,7 +6,7 @@
 
 **Native execution. Hardware-adaptive graphics. Performance first.**
 
-![Version](https://img.shields.io/badge/version-0.63.0-1E90FF?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-0.68.0-1E90FF?style=for-the-badge)
 ![Language](https://img.shields.io/badge/C%2B%2B-20-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)
 ![Platform](https://img.shields.io/badge/target-Windows%20x64-0078D4?style=for-the-badge)
 ![Graphics](https://img.shields.io/badge/graphics-DirectX%2012-555555?style=for-the-badge)
@@ -32,7 +32,7 @@ The project targets desktop Direct3D 12, vendor-adaptive GPU detection and RDNA2
 
 ## Development progress
 
-### Current release: v0.63.0
+### Current release: v0.68.0
 
 The following diagram shows the state of the main components, rather than an arbitrary percentage of the entire project.
 
@@ -95,7 +95,7 @@ flowchart TD
 
 ### What has been achieved
 
-The v0.62.0 Windows baseline passed 21 focused and seven GPU tests. v0.63.0 consolidates offline executable compatibility diagnostics; see [target analysis](docs/COMPATIBILITY.md). No target execution or console ABI binding is implemented.
+The v0.67.0 Windows baseline passed 29 focused and seven GPU tests. v0.68.0 adds an offline transitive dependency audit for explicit file inventories, including forwarder reachability and cycle diagnostics. The fixed native loader lifecycle remains unchanged; general guest import binding and static TLS are not implemented. See [loader lifecycle](docs/LOADER_067.md).
 
 These results demonstrate independent executable preparation, fixed native execution, host runtime services and desktop graphics. They do **not** demonstrate execution of an Xbox title or a complete console compatibility layer. No title-specific or protected material is distributed.
 
@@ -164,7 +164,7 @@ This builds the Release configuration, runs automated regression and GPU fixture
 
 For faster development iterations, keep the existing `build` directory and use `-FastBuild -BuildJobs 2`. This disables interprocedural optimisation while keeping Release optimisation, and builds with two concurrent jobs. Use the same flags on subsequent runs to avoid rebuilding when switching optimisation modes. Reduce to `-BuildJobs 1` if memory pressure or compiler file-access errors occur. Omit `-FastBuild` for the standard optimised build.
 
-For focused development checks, add `-Focused` to the validation command. It builds Revenge, the native ABI library, selected graphics and platform tests, and the optional GDK reference through one aggregate target. It runs selected portable regression tests including the fixed native image fixture, the GDK reference when enabled, and separately runs four required desktop GPU comparisons (texture sampling, render passes, configurable ABI multipass, and native queue integration). Each GPU check requires a successful exit and verification output. It does not certify the full suite. Run the command without `-Focused` for complete validation. When updating from an exact previous release, the optional incremental source archive replaces only changed files, preserving other source timestamps and existing build outputs.
+For focused development checks, add `-Focused` to the validation command. It builds Revenge, the native ABI library, selected graphics and platform tests, and the optional GDK reference through one aggregate target. It runs selected portable regression tests including the fixed native image fixture, the GDK reference when enabled, and separately runs seven required desktop GPU comparisons. Each GPU check requires a successful exit and verification output. It does not certify the full suite. Run the command without `-Focused` for complete validation. When updating from an exact previous release, the optional incremental source archive replaces only changed files, preserving other source timestamps and existing build outputs.
 
 The installed public GDK is detected via `GameDKCoreLatest`, `GameDK`, or the standard Program Files installation roots. Use `-GdkRoot "C:\Program Files (x86)\Microsoft GDK\261000"` to select an explicit SDK, or `-SkipGdk` to disable the optional reference. No SDK files are copied into Revenge.
 
