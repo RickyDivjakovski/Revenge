@@ -1,4 +1,6 @@
 #include "revenge/native_abi.h"
+#include "revenge/gpu_resources.hpp"
+#include "revenge/shader_stage.hpp"
 #include "revenge/application.hpp"
 #include "revenge/render_pass_fixture.hpp"
 #include "revenge/multimedia.hpp"
@@ -22,6 +24,7 @@
 #include <chrono>
 #include <array>
 #include <iostream>
+static_assert(sizeof(rv_gpu_program)==2056);
 static_assert(sizeof(void*)==8,"Revenge native ABI requires a 64-bit host");
 static_assert(sizeof(rv_request)==56 && offsetof(rv_request,handle)==16 && sizeof(rv_stats)==48 && sizeof(rv_frame_stats)==56 && sizeof(rv_pad_state)==40);
 namespace a=revenge::app;
@@ -88,13 +91,18 @@ struct ManagedThread { std::thread worker; uint32_t state=RV_THREAD_RUNNING, cod
 struct rv_session { std::mutex thread_mutex; std::condition_variable thread_cv; std::map<uint64_t,std::shared_ptr<ManagedThread>> threads; bool closing=false; std::mutex tls_mutex; std::map<uint64_t,std::map<uint64_t,uint64_t>> tls_slots; std::mutex gfx_mutex; std::map<uint64_t,revenge::package::Programs> packages; std::map<uint64_t,GraphicsResource> resources; size_t resource_bytes=0; a::Runtime runtime{[](unsigned,unsigned){revenge::scene3d::validate(revenge::scene3d::geometry(),revenge::scene3d::commands());}};JobQueue queue;
  #ifdef _WIN32
  std::shared_ptr<revenge::passes::PassCache> pass_cache;
+ std::shared_ptr<revenge::resident::Arena> resident;
+ struct ResidentInfo {uint64_t bytes,w,h;bool initialized=false;};
+ std::map<uint64_t,ResidentInfo> resident_info;uint64_t resident_bytes=0;
+ uint64_t resident_ticket=0;bool resident_pending=false;
+ std::map<uint64_t,std::pair<std::string,std::string>> resident_programs;
  #endif
  ~rv_session(){ // No external calls may race close; managed callbacks may finish naturally.
   {std::lock_guard lock(thread_mutex);closing=true;}
   for(auto& entry:threads)if(entry.second->worker.joinable())entry.second->worker.join();
   queue.shutdown();
 #ifdef _WIN32
-  {std::lock_guard lock(gpu_mutex);pass_cache.reset();}
+  {std::lock_guard lock(gpu_mutex);pass_cache.reset();resident.reset();}
 #endif
  }
 };
@@ -117,6 +125,151 @@ uint32_t RV_CALL rv_dispatch(rv_session* s,const rv_request* request,void* buffe
  if(r.reserved)return RV_INVALID;
  if(capacity>RV_MAX_TRANSFER)return RV_RANGE;
  if(capacity&&!buffer)return RV_INVALID;
+ if(r.op==RV_GPU_SUBMISSION_COUNT){
+  if(r.handle||r.offset||r.count||r.arg0||r.arg1||buffer||capacity)return RV_INVALID;
+#ifdef _WIN32
+  try{std::lock_guard lock(s->gfx_mutex);std::lock_guard gpu_lock(gpu_mutex);*result=s->resident?revenge::resident::submission_count(*s->resident):0;return RV_OK;}catch(...){return error();}
+#else
+  return RV_UNSUPPORTED;
+#endif
+ }
+ if(r.op>=RV_GPU_BATCH_POLL&&r.op<=RV_GPU_BATCH_RELEASE){
+  if(!r.handle||r.offset||r.count||r.arg1||buffer||capacity||(r.op!=RV_GPU_BATCH_WAIT&&r.arg0))return RV_INVALID;
+  if(r.arg0>10000)return RV_RANGE;
+#ifndef _WIN32
+  return RV_UNSUPPORTED;
+#else
+  try{std::lock_guard lock(s->gfx_mutex);std::lock_guard gpu_lock(gpu_mutex);
+   if(r.handle!=s->resident_ticket)return RV_INVALID;
+   if(r.op==RV_GPU_BATCH_RELEASE){if(s->resident_pending)return RV_STATE;s->resident_ticket=0;return RV_OK;}
+   if(s->resident_pending&&revenge::resident::batch_complete(*s->resident,static_cast<unsigned>(r.arg0)))s->resident_pending=false;
+   *result=!s->resident_pending;return RV_OK;
+  }catch(...){return error();}
+#endif
+ }
+ if(r.op==RV_GPU_DRAW_BATCH||r.op==RV_GPU_BATCH_SUBMIT){
+  if(r.handle||r.offset||r.arg0||r.arg1||!buffer)return RV_INVALID;
+  if(!r.count||r.count>RV_GPU_BATCH_MAX||capacity!=r.count*sizeof(rv_gpu_batch_draw))return RV_RANGE;
+  std::array<rv_gpu_batch_draw,RV_GPU_BATCH_MAX> packets{};std::memcpy(packets.data(),buffer,static_cast<size_t>(capacity));
+  for(size_t n=0;n<r.count;++n){const auto& c=packets[n];if(c.reserved||!c.target||!c.texture||!c.vertices||!c.indices||c.target==c.texture||c.vertices==c.indices)return RV_INVALID;if(!c.count||c.count%3||c.count>65535)return RV_RANGE;}
+#ifndef _WIN32
+  return RV_UNSUPPORTED;
+#else
+  try{std::lock_guard lock(s->gfx_mutex);std::lock_guard gpu_lock(gpu_mutex);if(!s->runtime.stats().running)return RV_STATE;
+   const bool async=r.op==RV_GPU_BATCH_SUBMIT;
+   if(s->resident_pending||(async&&s->resident_ticket))return RV_STATE;
+   auto shadow=s->resident_info;std::vector<revenge::resident::Draw> commands;commands.reserve(static_cast<size_t>(r.count));
+   for(size_t n=0;n<r.count;++n){const auto& c=packets[n];auto t=shadow.find(c.target),x=shadow.find(c.texture),v=shadow.find(c.vertices),i=shadow.find(c.indices);
+    if(t==shadow.end()||x==shadow.end()||v==shadow.end()||i==shadow.end())return RV_INVALID;
+    if(!t->second.w||t->second.w!=x->second.w||t->second.h!=x->second.h||v->second.w||i->second.w||c.count>i->second.bytes/2||v->second.bytes%8||v->second.bytes<24||v->second.bytes/8>65536)return RV_RANGE;
+    if(!x->second.initialized||!v->second.initialized||!i->second.initialized)return RV_STATE;
+    revenge::resident::Draw cmd{c.target,c.texture,c.vertices,c.indices,c.count,c.texture,0,0xffffffffu,{},{}};
+    if(c.pipeline){auto p=s->resident_programs.find(c.pipeline);if(p==s->resident_programs.end())return RV_INVALID;cmd.vs=p->second.first;cmd.ps=p->second.second;}
+    commands.push_back(std::move(cmd));t->second.initialized=true;
+   }
+   const auto ticket=async?next_package():0;
+   revenge::resident::draw_batch(*s->resident,commands,async);s->resident_info.swap(shadow);
+   if(async){s->resident_ticket=ticket;s->resident_pending=true;}*result=async?ticket:r.count;return RV_OK;
+  }catch(...){return error();}
+#endif
+ }
+ if(r.op==RV_GPU_PROGRAM_COUNT||r.op==RV_GPU_PROGRAM_HANDLES||r.op==RV_GPU_PROGRAM_CLEAR){
+  if(r.handle||r.offset||r.count||r.arg0||r.arg1||buffer||capacity)return RV_INVALID;
+#ifndef _WIN32
+  return RV_UNSUPPORTED;
+#else
+  try{std::lock_guard lock(s->gfx_mutex);std::lock_guard gpu_lock(gpu_mutex);if(r.op==RV_GPU_PROGRAM_CLEAR){if(s->resident_pending||!s->runtime.stats().running||!s->resident_programs.empty())return RV_STATE;*result=s->resident?revenge::resident::clear_programs(*s->resident):0;}
+   else *result=r.op==RV_GPU_PROGRAM_HANDLES?s->resident_programs.size():(s->resident?revenge::resident::program_count(*s->resident):0);return RV_OK;}catch(...){return error();}
+#endif
+ }
+ if(r.op==RV_GPU_PROGRAM_RELEASE){
+  if(!r.handle||r.offset||r.count||r.arg0||r.arg1||buffer||capacity)return RV_INVALID;
+#ifndef _WIN32
+  return RV_UNSUPPORTED;
+#else
+  try{std::lock_guard lock(s->gfx_mutex);if(s->resident_pending||!s->runtime.stats().running)return RV_STATE;if(!s->resident_programs.erase(r.handle))return RV_INVALID;return RV_OK;}catch(...){return error();}
+#endif
+ }
+ if(r.op==RV_GPU_DRAW_INDEXED||r.op==RV_GPU_DRAW_EXTENDED||r.op==RV_GPU_DRAW_PROGRAM||r.op==RV_GPU_PROGRAM_CREATE||r.op==RV_GPU_DRAW_PIPELINE){
+  std::string vertex_source,pixel_source;
+  if(r.op==RV_GPU_DRAW_PROGRAM||r.op==RV_GPU_PROGRAM_CREATE){
+   if(r.op==RV_GPU_PROGRAM_CREATE&&(r.handle||r.offset||r.count||r.arg0||r.arg1))return RV_INVALID;
+   if(!buffer||capacity!=sizeof(rv_gpu_program))return RV_INVALID;
+   rv_gpu_program program{};std::memcpy(&program,buffer,sizeof(program));
+   if(!program.vertex_count||program.vertex_count>RV_GPU_STAGE_WORDS||!program.pixel_count||program.pixel_count>RV_GPU_STAGE_WORDS)return RV_INVALID;
+   try{vertex_source=revenge::stage::emit(revenge::stage::Stage::vertex,{program.vertex,program.vertex_count});pixel_source=revenge::stage::emit(revenge::stage::Stage::pixel,{program.pixel,program.pixel_count});}catch(...){return error();}
+  }
+#ifndef _WIN32
+  return RV_UNSUPPORTED;
+#else
+  try{std::lock_guard lock(s->gfx_mutex);std::lock_guard gpu_lock(gpu_mutex);
+   if(s->resident_pending)return RV_STATE;
+   if(r.op==RV_GPU_PROGRAM_CREATE){
+    if(!s->runtime.stats().running)return RV_STATE;
+    if(s->resident_programs.size()>=16)return RV_RANGE;
+    if(!s->resident)s->resident=revenge::resident::create();
+    auto id=next_package();auto [it,ok]=s->resident_programs.emplace(id,std::make_pair(std::move(vertex_source),std::move(pixel_source)));
+    try{revenge::resident::prepare_program(*s->resident,it->second.first,it->second.second);}catch(...){s->resident_programs.erase(it);throw;}
+    *result=id;return RV_OK;
+   }
+   if(r.op==RV_GPU_DRAW_PIPELINE){
+    uint64_t id=0;if(!buffer||capacity!=sizeof(id))return RV_INVALID;std::memcpy(&id,buffer,sizeof(id));
+    auto program=s->resident_programs.find(id);if(program==s->resident_programs.end())return RV_INVALID;
+    vertex_source=program->second.first;pixel_source=program->second.second;
+   }
+   rv_gpu_draw_options opt{r.offset,0,0xffffffffu};
+   if(r.op==RV_GPU_DRAW_EXTENDED){if(!buffer||capacity!=sizeof(opt))return RV_INVALID;std::memcpy(&opt,buffer,sizeof(opt));if(opt.mode>3||!opt.second_texture||(opt.mode!=2&&opt.second_texture!=r.offset))return RV_INVALID;}else if(r.op!=RV_GPU_DRAW_PROGRAM&&r.op!=RV_GPU_DRAW_PIPELINE&&(buffer||capacity))return RV_INVALID;
+   if(!r.handle||!r.offset||!r.arg0||!r.arg1||r.handle==r.offset||r.handle==opt.second_texture||r.arg0==r.arg1)return RV_INVALID;
+   if(!s->runtime.stats().running)return RV_STATE;
+   auto t=s->resident_info.find(r.handle),x=s->resident_info.find(r.offset),v=s->resident_info.find(r.arg0),i=s->resident_info.find(r.arg1);
+   if(t==s->resident_info.end()||x==s->resident_info.end()||v==s->resident_info.end()||i==s->resident_info.end())return RV_INVALID;
+   if(!t->second.w||t->second.w!=x->second.w||t->second.h!=x->second.h||v->second.w||i->second.w)return RV_RANGE;
+   if(!r.count||r.count%3||r.count>65535||r.count>i->second.bytes/2||v->second.bytes%8||v->second.bytes<24||v->second.bytes/8>65536)return RV_RANGE;
+   auto x2=s->resident_info.find(opt.second_texture);if(x2==s->resident_info.end())return RV_INVALID;
+   if(x2->second.w!=t->second.w||x2->second.h!=t->second.h)return RV_RANGE;
+   if(!x->second.initialized||!x2->second.initialized||!v->second.initialized||!i->second.initialized)return RV_STATE;
+   revenge::resident::draw(*s->resident,r.handle,r.offset,r.arg0,r.arg1,static_cast<unsigned>(r.count),opt.second_texture,opt.mode,opt.tint,vertex_source,pixel_source);t->second.initialized=true;*result=r.count;return RV_OK;
+  }catch(...){return error();}
+#endif
+ }
+ if(r.op>=RV_GPU_ALLOC&&r.op<=RV_GPU_USAGE){
+#ifndef _WIN32
+  return RV_UNSUPPORTED;
+#else
+  try{std::lock_guard lock(s->gfx_mutex);std::lock_guard gpu_lock(gpu_mutex);
+   if(r.offset)return RV_INVALID;
+   if(r.op==RV_GPU_USAGE){if(r.handle||r.count||r.arg0||r.arg1||buffer||capacity)return RV_INVALID;*result=s->resident_bytes;return RV_OK;}
+   if(s->resident_pending||!s->runtime.stats().running)return RV_STATE;
+   if(r.op==RV_GPU_ALLOC){if(r.handle||buffer||capacity)return RV_INVALID;
+    if(!r.count||r.count>RV_MAX_TRANSFER||r.count>8u*1024u*1024u-s->resident_bytes||s->resident_info.size()>=64)return RV_RANGE;
+    if((r.arg0==0)!=(r.arg1==0)||r.arg0>512||r.arg1>512||(r.arg0&&r.arg0*r.arg1*4!=r.count))return RV_RANGE;
+    if(!s->resident)s->resident=revenge::resident::create();auto id=next_package();
+    auto [it,ok]=s->resident_info.emplace(id,rv_session::ResidentInfo{r.count,r.arg0,r.arg1,false});
+    try{revenge::resident::allocate(*s->resident,id,r.count,static_cast<unsigned>(r.arg0),static_cast<unsigned>(r.arg1));}catch(...){s->resident_info.erase(it);throw;}
+    s->resident_bytes+=r.count;*result=id;return RV_OK;}
+   auto it=s->resident_info.find(r.handle);if(it==s->resident_info.end())return RV_INVALID;auto& v=it->second;
+   if(r.op==RV_GPU_RELEASE){if(r.count||r.arg0||r.arg1||buffer||capacity)return RV_INVALID;revenge::resident::release(*s->resident,r.handle);s->resident_bytes-=v.bytes;s->resident_info.erase(it);return RV_OK;}
+   if(r.op==RV_GPU_COPY){if(r.count||r.arg1||buffer||capacity||r.arg0==r.handle)return RV_INVALID;auto src=s->resident_info.find(r.arg0);if(src==s->resident_info.end())return RV_INVALID;auto& a=src->second;if(a.bytes!=v.bytes||a.w!=v.w||a.h!=v.h)return RV_RANGE;if(!a.initialized)return RV_STATE;revenge::resident::copy(*s->resident,r.handle,r.arg0);v.initialized=true;*result=v.bytes;return RV_OK;}
+   if(r.arg0||r.arg1)return RV_INVALID;if(!buffer||capacity!=v.bytes||r.count!=capacity)return RV_RANGE;
+   if(r.op==RV_GPU_UPLOAD){revenge::resident::upload(*s->resident,r.handle,{static_cast<const uint8_t*>(buffer),static_cast<size_t>(capacity)});v.initialized=true;}else{if(!v.initialized)return RV_STATE;revenge::resident::read(*s->resident,r.handle,{static_cast<uint8_t*>(buffer),static_cast<size_t>(capacity)});}*result=capacity;return RV_OK;
+  }catch(...){return error();}
+#endif
+ }
+ if(r.op>=RV_RES_INFO&&r.op<=RV_RES_USAGE){
+  try{std::lock_guard lock(s->gfx_mutex);
+   if(r.op==RV_RES_USAGE){if(r.handle||r.offset||r.count||r.arg0||r.arg1||buffer||capacity)return RV_INVALID;*result=s->resource_bytes;return RV_OK;}
+   if(!s->runtime.stats().running)return RV_STATE;
+   auto it=s->resources.find(r.handle);if(it==s->resources.end())return RV_INVALID;auto& dst=it->second;
+   if(r.op==RV_RES_INFO){if(r.offset||r.count||r.arg0||r.arg1)return RV_INVALID;if(!buffer||capacity!=sizeof(rv_resource_info))return RV_RANGE;rv_resource_info info{dst.kind,dst.bytes.size(),dst.width,dst.height};std::memcpy(buffer,&info,sizeof(info));*result=sizeof(info);return RV_OK;}
+   if(r.op==RV_RES_READ){if(r.arg0||r.arg1)return RV_INVALID;if(!buffer||!capacity||r.count!=capacity||r.offset>dst.bytes.size()||capacity>dst.bytes.size()-r.offset)return RV_RANGE;std::memcpy(buffer,dst.bytes.data()+r.offset,capacity);*result=capacity;return RV_OK;}
+   if(r.op==RV_RES_CLONE){if(r.offset||r.count||r.arg0||r.arg1||buffer||capacity)return RV_INVALID;if(s->resources.size()>=64||dst.bytes.size()>8u*1024u*1024u-s->resource_bytes)return RV_RANGE;auto size=dst.bytes.size();auto id=next_package();s->resources.emplace(id,dst);s->resource_bytes+=size;*result=id;return RV_OK;}
+   if(buffer||capacity||!r.count||dst.kind==RV_COMMANDS)return RV_INVALID;
+   auto src=s->resources.find(r.arg0);if(src==s->resources.end()||src->second.kind!=dst.kind)return RV_INVALID;
+   auto unit=dst.kind==RV_VERTEX?sizeof(rv_vertex):dst.kind==RV_INDEX?sizeof(uint16_t):size_t(4);
+   if(r.offset%unit||r.arg1%unit||r.count%unit||r.offset>dst.bytes.size()||r.count>dst.bytes.size()-r.offset||r.arg1>src->second.bytes.size()||r.count>src->second.bytes.size()-r.arg1)return RV_RANGE;
+   std::memmove(dst.bytes.data()+r.offset,src->second.bytes.data()+r.arg1,r.count);*result=r.count;return RV_OK;
+  }catch(...){return error();}
+ }
  if(r.op==RV_PASS_RENDER){
   if(r.handle||r.offset||r.arg1||r.arg0>1||!buffer)return RV_INVALID;
   if(r.count<sizeof(rv_pass_header)||r.count>capacity)return RV_RANGE;
@@ -315,9 +468,9 @@ uint32_t RV_CALL rv_dispatch(rv_session* s,const rv_request* request,void* buffe
    if(r.op==RV_GFX_COUNT){*result=s->packages.size();return RV_OK;}
    if(!s->runtime.stats().running)return RV_STATE;
    if(r.op==RV_GFX_CAPS){
-    *result=RV_GFX_ASYNC;
+    *result=RV_GFX_ASYNC|RV_GFX_RESOURCE_TRANSFER;
 #ifdef _WIN32
-    *result|=RV_GFX_GPU|RV_GFX_PRESENT|RV_GFX_CONTINUOUS|RV_GFX_CUSTOM|RV_GFX_MULTIPASS;
+    *result|=RV_GFX_GPU|RV_GFX_PRESENT|RV_GFX_CONTINUOUS|RV_GFX_CUSTOM|RV_GFX_MULTIPASS|RV_GFX_RESIDENT_TRANSFER|RV_GFX_RESIDENT_DRAW|RV_GFX_RESIDENT_EXTENDED|RV_GFX_RESIDENT_PROGRAM|RV_GFX_RESIDENT_BATCH|RV_GFX_RESIDENT_ASYNC;
 #endif
     return RV_OK;
    }
@@ -402,7 +555,7 @@ uint32_t RV_CALL rv_dispatch(rv_session* s,const rv_request* request,void* buffe
  case RV_STATS:{if(capacity<sizeof(rv_stats))return RV_RANGE;auto v=rt.stats();rv_stats stats{v.memory_handles,v.events,v.files,v.storage_bytes,v.committed,v.running?1u:0u};std::memcpy(buffer,&stats,sizeof(stats));*result=sizeof(stats);break;}
  case RV_STOP:{std::lock_guard thread_lock(s->thread_mutex);if(s->closing||!s->threads.empty())return RV_STATE;std::lock_guard lock(s->gfx_mutex);{std::lock_guard tls_lock(s->tls_mutex);rt.dispatch(a::Stop{});s->tls_slots.clear();}s->queue.shutdown();
 #ifdef _WIN32
- {std::lock_guard gpu_lock(gpu_mutex);s->pass_cache.reset();}
+ {std::lock_guard gpu_lock(gpu_mutex);s->pass_cache.reset();s->resident.reset();s->resident_info.clear();s->resident_programs.clear();s->resident_bytes=0;s->resident_ticket=0;s->resident_pending=false;}
 #endif
  s->packages.clear();s->resources.clear();s->resource_bytes=0;break;}
  default:return RV_UNSUPPORTED;

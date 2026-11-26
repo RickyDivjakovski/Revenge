@@ -19,7 +19,7 @@ extern "C" {
 #define RV_MAX_TRANSFER 1048576u
 typedef struct rv_session rv_session;
 enum rv_status { RV_OK=0, RV_INVALID=1, RV_VERSION=2, RV_UNSUPPORTED=3, RV_RANGE=4, RV_STATE=5, RV_FAILURE=6 };
-enum rv_op { RV_ALLOC=1, RV_FREE=2, RV_READ=3, RV_WRITE=4, RV_EVENT_CREATE=5, RV_EVENT_SET=6, RV_EVENT_RESET=7, RV_EVENT_WAIT=8, RV_EVENT_CLOSE=9, RV_CLOCK=10, RV_RENDER_VALIDATE=11, RV_STATS=12, RV_STOP=13, RV_GFX_CAPS=14, RV_GFX_LOAD=15, RV_GFX_RELEASE=16, RV_GFX_DRAW=17, RV_GFX_COUNT=18, RV_GFX_RUN=19, RV_RES_CREATE=20, RV_RES_RELEASE=21, RV_CMD_VALIDATE=22, RV_CMD_SUBMIT=23, RV_RES_COUNT=24, RV_RES_UPDATE=25, RV_JOB_SUBMIT=26, RV_JOB_POLL=27, RV_JOB_WAIT=28, RV_JOB_READ=29, RV_JOB_RELEASE=30, RV_JOB_COUNT=31, RV_MUTEX_CREATE=32, RV_MUTEX_LOCK=33, RV_MUTEX_UNLOCK=34, RV_MUTEX_CLOSE=35, RV_SEM_CREATE=36, RV_SEM_WAIT=37, RV_SEM_RELEASE=38, RV_SEM_CLOSE=39, RV_STORE_PUT=40, RV_STORE_GET=41, RV_STORE_SIZE=42, RV_STORE_ERASE=43, RV_SYNC_COUNT=44, RV_TLS_CREATE=45, RV_TLS_SET=46, RV_TLS_GET=47, RV_TLS_RELEASE=48, RV_TLS_DETACH=49, RV_TLS_COUNT=50, RV_THREAD_CREATE=51, RV_THREAD_POLL=52, RV_THREAD_WAIT=53, RV_THREAD_EXIT=54, RV_THREAD_RELEASE=55, RV_THREAD_COUNT=56, RV_MEDIA_CAPS=57, RV_AUDIO_PLAY=58, RV_PAD_POLL=59, RV_SNAPSHOT_SAVE=60, RV_SNAPSHOT_LOAD=61, RV_GFX_LOAD_CUSTOM=62, RV_RES_PATCH=63, RV_PASS_RENDER=64 };
+enum rv_op { RV_ALLOC=1, RV_FREE=2, RV_READ=3, RV_WRITE=4, RV_EVENT_CREATE=5, RV_EVENT_SET=6, RV_EVENT_RESET=7, RV_EVENT_WAIT=8, RV_EVENT_CLOSE=9, RV_CLOCK=10, RV_RENDER_VALIDATE=11, RV_STATS=12, RV_STOP=13, RV_GFX_CAPS=14, RV_GFX_LOAD=15, RV_GFX_RELEASE=16, RV_GFX_DRAW=17, RV_GFX_COUNT=18, RV_GFX_RUN=19, RV_RES_CREATE=20, RV_RES_RELEASE=21, RV_CMD_VALIDATE=22, RV_CMD_SUBMIT=23, RV_RES_COUNT=24, RV_RES_UPDATE=25, RV_JOB_SUBMIT=26, RV_JOB_POLL=27, RV_JOB_WAIT=28, RV_JOB_READ=29, RV_JOB_RELEASE=30, RV_JOB_COUNT=31, RV_MUTEX_CREATE=32, RV_MUTEX_LOCK=33, RV_MUTEX_UNLOCK=34, RV_MUTEX_CLOSE=35, RV_SEM_CREATE=36, RV_SEM_WAIT=37, RV_SEM_RELEASE=38, RV_SEM_CLOSE=39, RV_STORE_PUT=40, RV_STORE_GET=41, RV_STORE_SIZE=42, RV_STORE_ERASE=43, RV_SYNC_COUNT=44, RV_TLS_CREATE=45, RV_TLS_SET=46, RV_TLS_GET=47, RV_TLS_RELEASE=48, RV_TLS_DETACH=49, RV_TLS_COUNT=50, RV_THREAD_CREATE=51, RV_THREAD_POLL=52, RV_THREAD_WAIT=53, RV_THREAD_EXIT=54, RV_THREAD_RELEASE=55, RV_THREAD_COUNT=56, RV_MEDIA_CAPS=57, RV_AUDIO_PLAY=58, RV_PAD_POLL=59, RV_SNAPSHOT_SAVE=60, RV_SNAPSHOT_LOAD=61, RV_GFX_LOAD_CUSTOM=62, RV_RES_PATCH=63, RV_PASS_RENDER=64, RV_RES_INFO=65, RV_RES_READ=66, RV_RES_CLONE=67, RV_RES_COPY=68, RV_RES_USAGE=69, RV_GPU_ALLOC=70, RV_GPU_UPLOAD=71, RV_GPU_READ=72, RV_GPU_COPY=73, RV_GPU_RELEASE=74, RV_GPU_USAGE=75, RV_GPU_DRAW_INDEXED=76, RV_GPU_DRAW_EXTENDED=77, RV_GPU_DRAW_PROGRAM=78, RV_GPU_PROGRAM_COUNT=79, RV_GPU_PROGRAM_CREATE=80, RV_GPU_PROGRAM_RELEASE=81, RV_GPU_DRAW_PIPELINE=82, RV_GPU_PROGRAM_HANDLES=83, RV_GPU_PROGRAM_CLEAR=84, RV_GPU_DRAW_BATCH=85, RV_GPU_SUBMISSION_COUNT=86, RV_GPU_BATCH_SUBMIT=87, RV_GPU_BATCH_POLL=88, RV_GPU_BATCH_WAIT=89, RV_GPU_BATCH_RELEASE=90 };
 /* MEDIA_CAPS: bits 1 PCM playback, 2 XInput, 4 snapshots. Compiled capabilities only.
    AUDIO_PLAY: count=bytes, buffer=48 kHz stereo PCM16, 20..2000 ms, synchronous.
    PAD_POLL: arg0=controller index 0..3; buffer=rv_pad_state; disconnected is success.
@@ -61,6 +61,31 @@ enum rv_thread_state { RV_THREAD_RUNNING=1, RV_THREAD_COMPLETE=2, RV_THREAD_FAIL
 #define RV_GFX_CUSTOM 8u
 #define RV_GFX_ASYNC 16u
 #define RV_GFX_MULTIPASS 32u
+#define RV_GFX_RESOURCE_TRANSFER 64u
+#define RV_GFX_RESIDENT_TRANSFER 128u
+/* DRAW_INDEXED: handle=target, offset=texture, arg0=vertex buffer, arg1=index buffer, count=index count.
+ * Vertex format float2 clip-space position; uint16 indices; same-size RGBA8 source and target. */
+#define RV_GFX_RESIDENT_DRAW 256u
+#define RV_GFX_RESIDENT_EXTENDED 512u
+#define RV_GFX_RESIDENT_PROGRAM 1024u
+#define RV_GFX_RESIDENT_BATCH 2048u
+#define RV_GPU_BATCH_MAX 32u
+#define RV_GFX_RESIDENT_ASYNC 4096u
+/* SUBMIT uses DRAW_BATCH packet; returns opaque ticket. POLL/WAIT handle=ticket,
+   WAIT arg0=0..10000 ms; result 0 pending, 1 complete. RELEASE requires observed completion.
+   One retained ticket per session; while pending, resident mutations/readback return RV_STATE.
+   STOP/close drain the GPU before freeing storage. Other request fields zero. */
+typedef struct rv_gpu_batch_draw { uint64_t target, texture, vertices, indices, pipeline; uint32_t count, reserved; } rv_gpu_batch_draw;
+#define RV_GPU_STAGE_WORDS 256u
+/* DRAW_PROGRAM / PROGRAM_CREATE: exact stage packet, only the declared words are used. */
+typedef struct rv_gpu_program { uint32_t vertex_count, pixel_count; uint32_t vertex[RV_GPU_STAGE_WORDS], pixel[RV_GPU_STAGE_WORDS]; } rv_gpu_program;
+/* Extended draw: same request fields as indexed draw, exact input packet.
+ * mode 0=copy, 1=invert RGB, 2=average two textures, 3=RGBA tint.
+ * second_texture must equal offset except mode 2; tint packed little-endian RGBA8. */
+typedef struct rv_gpu_draw_options { uint64_t second_texture; uint32_t mode, tint; } rv_gpu_draw_options;
+/* Separate resident handles: ALLOC count=bytes, arg0=width,arg1=height (both zero for buffer); returns handle. UPLOAD/READ count=exact bytes, buffer exact. COPY handle=destination,arg0=source, same extent and byte size. RELEASE handle. USAGE returns logical live bytes. Other fields zero. Newly allocated resources require upload or copy before read. */
+/* Host snapshots only. INFO: exact rv_resource_info buffer. READ: offset/count, exact buffer. CLONE: returns new handle. COPY: handle=dest, arg0=source, offset=dest offset, arg1=source offset, count=bytes, no buffer. USAGE: live bytes. */
+typedef struct rv_resource_info { uint64_t kind, bytes, width, height; } rv_resource_info;
 /* PASS_RENDER: arg0=0 CPU reference, 1 desktop GPU. count=input bytes.
    Buffer starts with rv_pass_header and draw_count rv_pass_draw records.
    Exact capacity=max(input bytes, width*height*12). On success the buffer

@@ -1,0 +1,7 @@
+#include "revenge/target_plan.hpp"
+#include <iostream>
+#include <stdexcept>
+using namespace revenge;
+void put(LoadPlan& p,size_t at,uint64_t v,unsigned n){for(unsigned i=0;i<n;++i)p.mapped.at(at+i)=static_cast<uint8_t>(v>>(8*i));}
+void check(const std::string& r,const char* s){if(r.find(s)==std::string::npos)throw std::runtime_error(s);}
+int main(){try{LoadPlan p{};p.image.image_size=0x4000;p.image.machine=0x8664;p.image.subsystem=3;p.image.entry=0x1000;p.header_bytes=0x200;p.mapped.resize(0x4000);p.image.sections={{".text",0x1000,0x1000,0x200,0x200,0x60000000},{".data",0x2000,0x1000,0x400,0x200,0xc0000000}};p.image.imports={{"d3d12_x.dll",{"Example"},{false}},{"other.dll",{"#1"},{true}}};put(p,0x3c,0x80,4);put(p,0x94,240,2);put(p,0x98,0x20b,2);put(p,0x98+108,16,4);auto r=compatibility_report(p,"fixture.exe");check(r,"executable section: 1; file-backed: 1");check(r,"console slots: 1; external slots: 1");check(r,"ordinal imports: 1");check(r,"Launch verdict: NOT VERIFIED");check(r,"Blocker: console-specific");p.image.entry=0x1400;r=compatibility_report(p,"fixture.exe");check(r,"file-backed: 0");check(r,"Blocker: entry");p.image.entry=0x2000;check(compatibility_report(p,"fixture.exe"),"executable section: 0");std::cout<<"Compatibility report: entry backing, permissions, imports and fail-closed verdict passed.\n";return 0;}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 1;}}

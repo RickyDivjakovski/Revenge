@@ -36,7 +36,7 @@ $buildTimer.Stop()
 Write-RevengeLine ('Build elapsed seconds: ' + $buildTimer.Elapsed.TotalSeconds.ToString('F2'))
 if ($Focused) {
     Write-RevengeLine 'Focused regression: graphics CPU references, manual, scheduled and native C task queues, SDK detection, API inventory and optional Windows GDK reference.'
-    Invoke-RevengeChecked ctest @('--test-dir', 'build', '-C', 'Release', '--verbose', '-R', '^(texture_(core|sampling_extended|gpu_workload)|render_pass_reference|native_abi_multipass|manual_queue_reference|scheduled_queue_reference|gdk_detection|gdk_api_inventory|public_gdk_reference|queue_c_abi|queue_native_integration|queue_tracked_cancellation|gpu_validation_contract|native_fixed_image)$', '--no-tests=error')
+    Invoke-RevengeChecked ctest @('--test-dir', 'build', '-C', 'Release', '--verbose', '-R', '^(texture_(core|sampling_extended|gpu_workload)|render_pass_reference|native_abi_multipass|manual_queue_reference|scheduled_queue_reference|gdk_detection|gdk_api_inventory|public_gdk_reference|queue_c_abi|queue_native_integration|queue_tracked_cancellation|queue_retained_operations|queue_operation_races|async_application|gpu_validation_contract|native_fixed_image|native_resource_transfer|resident_resources_contract|resident_draw_contract|executable_compatibility_contract)$', '--no-tests=error')
 } else {
     Invoke-RevengeChecked ctest @('--test-dir', 'build', '-C', 'Release', '--output-on-failure', '-LE', 'desktop_gpu')
 }

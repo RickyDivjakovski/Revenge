@@ -6,7 +6,7 @@
 
 **Native execution. Hardware-adaptive graphics. Performance first.**
 
-![Version](https://img.shields.io/badge/version-0.54.0-1E90FF?style=for-the-badge)
+![Version](https://img.shields.io/badge/version-0.63.0-1E90FF?style=for-the-badge)
 ![Language](https://img.shields.io/badge/C%2B%2B-20-00599C?style=for-the-badge&logo=cplusplus&logoColor=white)
 ![Platform](https://img.shields.io/badge/target-Windows%20x64-0078D4?style=for-the-badge)
 ![Graphics](https://img.shields.io/badge/graphics-DirectX%2012-555555?style=for-the-badge)
@@ -32,7 +32,7 @@ The project targets desktop Direct3D 12, vendor-adaptive GPU detection and RDNA2
 
 ## Development progress
 
-### Current release: v0.54.0
+### Current release: v0.63.0
 
 The following diagram shows the state of the main components, rather than an arbitrary percentage of the entire project.
 
@@ -95,7 +95,7 @@ flowchart TD
 
 ### What has been achieved
 
-The v0.53.0 Windows focused suite passed 15/15 tests and two of four desktop GPU tests. Both ABI GPU fixtures exited zero without output and failed strict validation. The current release uses session-owned multipass caches, explicit teardown, narrow adapter reporting and flushed diagnostic checkpoints. GPU fixtures still require successful execution and verified pixel output; Windows validation of v0.54.0 is pending.
+The v0.62.0 Windows baseline passed 21 focused and seven GPU tests. v0.63.0 consolidates offline executable compatibility diagnostics; see [target analysis](docs/COMPATIBILITY.md). No target execution or console ABI binding is implemented.
 
 These results demonstrate independent executable preparation, fixed native execution, host runtime services and desktop graphics. They do **not** demonstrate execution of an Xbox title or a complete console compatibility layer. No title-specific or protected material is distributed.
 

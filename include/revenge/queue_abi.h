@@ -47,6 +47,27 @@ RQ_API uint32_t RQ_CALL rq_dispatch(rq_context* ctx,rq_handle h,uint32_t port,ui
    Last close rejects pending/active callbacks. Reentrant stop during cancellation
    returns RQ_STATE. Callbacks must not throw. */
 RQ_API uint32_t RQ_CALL rq_stop(rq_context* ctx,rq_handle h);
+/* Retained independent asynchronous operations (not GDK XAsync ABI).
+   IDs are context- and logical-queue-scoped, aliases accepted. Max 64 retained
+   operations per queue. Work runs on the work dispatcher; completion is called
+   once on the dispatcher/cancellation/stop caller, outside the queue lock.
+   Pending work alone can be canceled. Result is valid only on success. Wait
+   observes terminal state, not notification completion; release requires both.
+   A completion callback may query its operation but cannot release it yet.
+   Keep user data alive through notification_done. Stop/join/release before last
+   close. No callback may destroy the context or throw across this C interface. */
+#define RQ_OPERATION_LIMIT 64u
+typedef uint64_t rq_operation;
+enum rq_operation_state { RQ_OP_QUEUED=1, RQ_OP_RUNNING=2, RQ_OP_CANCELING=3, RQ_OP_SUCCEEDED=4, RQ_OP_FAILED=5, RQ_OP_CANCELED=6 };
+typedef struct rq_operation_snapshot { uint32_t size,state,work_status,notification_done,notification_status,reserved; uint64_t result; } rq_operation_snapshot;
+typedef uint32_t (RQ_CALL *rq_operation_work)(void*,uint64_t* result);
+typedef void (RQ_CALL *rq_operation_completion)(void*,rq_operation,const rq_operation_snapshot*);
+RQ_API uint32_t RQ_CALL rq_operation_submit(rq_context*,rq_handle,uint32_t delay_ms,rq_operation_work,rq_operation_completion,void*,rq_operation* out);
+RQ_API uint32_t RQ_CALL rq_operation_query(rq_context*,rq_handle,rq_operation,rq_operation_snapshot* out);
+RQ_API uint32_t RQ_CALL rq_operation_wait(rq_context*,rq_handle,rq_operation,uint32_t timeout_ms,rq_operation_snapshot* out);
+RQ_API uint32_t RQ_CALL rq_operation_cancel(rq_context*,rq_handle,rq_operation);
+RQ_API uint32_t RQ_CALL rq_operation_release(rq_context*,rq_handle,rq_operation);
+RQ_API uint32_t RQ_CALL rq_operation_count(rq_context*,rq_handle,uint32_t* out);
 #ifdef __cplusplus
 }
 #endif

@@ -2,6 +2,66 @@
 
 Historical release notes, newest first. Historical test counts and planned features describe their respective releases; see [README.md](README.md) for current capabilities.
 
+## v0.63.0 — executable compatibility diagnostics
+
+- Consolidate entry-point, page layout, imports, delay imports, TLS, unwind and GDK inventory in one offline report.
+- Allow optional authorised target in focused validation; no target execution or binding.
+- Add compatibility regression fixture. v0.62.0 passed 21 focused and seven hardware tests.
+
+## v0.62.0 — asynchronous resident submission
+
+- Submit up to 32 draws without waiting for the GPU fence; one retained ticket per session. Poll, timed wait, explicit release and stale handle validation.
+- Protect command allocator, descriptors, resources and pipelines from mutation until completion is observed. Stop and close drain pending work.
+- Extend resident drawing fixture with asynchronous ping-pong draws and lifecycle checks; Windows hardware validation pending. v0.61.0 passed 21 focused and seven GPU tests.
+
+## v0.61.0 — resident draw batching
+
+- Submit up to 32 fixed or translated indexed draws in one D3D12 command list and one fence wait; distinct descriptor slots prevent overwrite between recorded draws.
+- Validate all draw packets and sequential initialization dependencies before recording; hold session and GPU locks through completion.
+- Expose submission counter; test ping-pong targets, pipeline switching, rejected batch without submission and readback. Windows hardware validation pending.
+- v0.60.0 Windows baseline: 21 focused and seven GPU tests passed. Asynchronous submission remains outstanding.
+
+## v0.60.0 — translated resident stage programs
+
+- Integrate the existing restricted vertex/pixel stage decoder and HLSL emitter into resident indexed draws. Add bounded stage packets, point-clamp sampling and a session-local cache of up to 16 program pairs.
+- Add session-local precompiled pipeline handles, duplicate-pair reuse, handle release, explicit cache clearing and live/cache counts.
+- Preserve fixed draw paths; test program switching, repeat use, vertex narrowing, channel swizzle and malformed packets. Windows validation pending.
+- v0.59.0 Windows baseline: 21 focused and seven GPU tests passed. No arbitrary console translation or command batching.
+
+## v0.59.0 — configurable resident pixel operations
+
+- Extend resident indexed draws with a second SRV and root constants for copy, invert, average and tint; preserve legacy draw behavior.
+- Add validation for the exact options packet, mode, second texture dimensions, initialization and target aliasing; extend hardware fixture with ten pixel-checked draws.
+- v0.58.0 Windows baseline: 21 focused and seven GPU tests passed. Windows hardware validation pending for this update. No arbitrary shader translation or command batching.
+
+## v0.58.0 — resident indexed graphics
+
+- Bind persistent GPU float2 vertex buffers, uint16 index buffers and RGBA8 shader textures directly to a cached fixed desktop D3D12 graphics pipeline; draw into persistent RGBA8 targets with explicit barriers and fence completion.
+- Add capability bit and indexed draw operation with session, shape, count and initialization checks; target can be rebound as a source. No CPU shadow or host reupload between passes.
+- Add non-device contract and hardware fixture for 24 full-target indexed draws, two partial draws and 4860 fully compared pixels across two extents, invalid requests and cleanup. Windows validation pending.
+- v0.57.0 Windows baseline: 20/20 focused and 6/6 GPU tests passed; full regression not run. No general console shader translation, arbitrary pipeline creation or asynchronous command batching in this release.
+
+## v0.57.0 — resident GPU transfer arena
+
+- Add six independent resident resource operations, default-heap buffers and single-mip RGBA8 textures, upload/readback staging, aligned texture footprints, GPU resource copy and explicit COMMON transitions.
+- Session-scoped handles, logical byte and count limits, initialized-content checks, stop cleanup; no CPU shadow or silent CPU fallback.
+- Synchronous fence-checked transfers only; no drawing from resident handles, shader translation, asynchronous transfer batching or GPU hang recovery verified.
+- v0.56.0 Windows baseline: 19/19 focused and 5/5 GPU tests passed; full Windows suite not run.
+
+## v0.56.0 — native resource transfer services
+
+- Add host-side resource metadata, bounded byte readback, independent cloning, aligned overlapping copies and live byte accounting to the existing ABI version 1; discoverable through a capability bit.
+- Preserve resource budgets and session locking. Add focused regression for isolation, alignment, overflow, stale handles and stop cleanup.
+- v0.55.0 Windows baseline: 18/18 focused and 5/5 desktop GPU tests passed; full Windows regression not run. v0.56.0 portable CTest: 78/78 passed; Windows validation pending.
+- No new GPU-resident resource allocation, console shader translation or Xbox executable execution in this update.
+
+## v0.55.0 — retained asynchronous operations and application integration
+
+- Add independent retained operation C ABI: submit, query, wait, cancel, release and count; status, results and completion notification tracking. Not a Microsoft GDK ABI.
+- Add C operation lifecycle and concurrent race fixtures. Integrate three rendering operations and one canceled operation with the managed native worker, graphics ABI, memory readback and cleanup. CPU oracle checks 657 pixels.
+- Add a fifth desktop GPU validation test requiring verified pixels and session cache teardown with three calls, two allocations and one reuse. Windows validation pending.
+- v0.54.0 Windows baseline: 15/15 focused and 4/4 desktop GPU tests passed; full Windows regression not run. v0.55.0 portable Release: 77/77 CTest and 2/2 Python tests passed.
+
 ## v0.54.0 — explicit multipass ownership and diagnostics
 
 - Replace module-static multipass cache with explicit per-session ownership and a local CLI cache. Stop and close release the session cache after managed workers finish. Same-size slot reuse remains within each session.

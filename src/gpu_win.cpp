@@ -785,3 +785,114 @@ int gpu_test(){
 std::cout<<"Desktop render passes: 768 pixels verified, two MRTs, depth/stencil, scissor, independent blending, render-to-texture, two SRVs, root constants and four PSOs; max byte error "<<worst<<". Desktop D3D12 only.\n";return 0;
 }
 }
+
+// Independent resident transfer and fixed indexed draw arena; not a console ABI.
+#include "revenge/gpu_resources.hpp"
+#include <map>
+namespace revenge::resident {
+class Arena {
+public:
+ struct Entry { ComPtr<ID3D12Resource> resource; uint64_t bytes; unsigned w,h; };
+ Gpu gpu=select();
+ ComPtr<ID3D12CommandQueue> queue;
+ ComPtr<ID3D12Fence> fence;
+ ComPtr<ID3D12CommandAllocator> allocator;
+ ComPtr<ID3D12GraphicsCommandList> list;
+ Handle event;
+ uint64_t sequence=0;
+ bool failed=false, pending=false;
+ std::map<uint64_t,Entry> entries;
+ // Keep staging resources alive if a submitted operation fails.
+ ComPtr<ID3D12Resource> staging;
+ ComPtr<ID3D12RootSignature> draw_root;
+ ComPtr<ID3D12PipelineState> draw_pso;
+ std::map<std::pair<std::string,std::string>,ComPtr<ID3D12PipelineState>> program_psos;
+ ComPtr<ID3D12DescriptorHeap> draw_srv,draw_rtv;
+ Arena(){auto d=gpu.device.Get();D3D12_COMMAND_QUEUE_DESC desc{};desc.Type=D3D12_COMMAND_LIST_TYPE_DIRECT;
+  check(d->CreateCommandQueue(&desc,IID_PPV_ARGS(&queue)),"resident queue");
+  check(d->CreateFence(0,D3D12_FENCE_FLAG_NONE,IID_PPV_ARGS(&fence)),"resident fence");
+  check(d->CreateCommandAllocator(desc.Type,IID_PPV_ARGS(&allocator)),"resident allocator");
+  check(d->CreateCommandList(0,desc.Type,allocator.Get(),nullptr,IID_PPV_ARGS(&list)),"resident list");check(list->Close(),"resident initial close");}
+ ~Arena(){ // Keep command storage and all resident objects alive until the queued work retires.
+  if(pending){while(fence->GetCompletedValue()<sequence)Sleep(1);}
+ }
+ void healthy(){if(pending)throw std::logic_error("resident batch pending");if(failed)throw std::runtime_error("resident arena failed");}
+ void begin(){healthy();failed=true;check(allocator->Reset(),"resident allocator reset");check(list->Reset(allocator.Get(),nullptr),"resident list reset");}
+ void finish(bool asynchronous=false){if(sequence>=UINT64_MAX-1)throw std::runtime_error("resident fence exhausted");check(list->Close(),"resident list close");ID3D12CommandList* lists[]={list.Get()};queue->ExecuteCommandLists(1,lists);check(queue->Signal(fence.Get(),++sequence),"resident signal");pending=true;if(!asynchronous){wait(fence.Get(),sequence,event.h);pending=false;}failed=false;}
+ void barrier(Entry& e,D3D12_RESOURCE_STATES before,D3D12_RESOURCE_STATES after){D3D12_RESOURCE_BARRIER b{};b.Type=D3D12_RESOURCE_BARRIER_TYPE_TRANSITION;b.Transition={e.resource.Get(),D3D12_RESOURCE_BARRIER_ALL_SUBRESOURCES,before,after};list->ResourceBarrier(1,&b);}
+};
+std::shared_ptr<Arena> create(){return std::make_shared<Arena>();}
+void allocate(Arena& a,uint64_t id,uint64_t bytes,unsigned w,unsigned h){a.healthy();Arena::Entry e{{},bytes,w,h};auto d=a.gpu.device.Get();if(!w)e.resource=buffer(d,bytes,D3D12_HEAP_TYPE_DEFAULT,D3D12_RESOURCE_STATE_COMMON);else{D3D12_HEAP_PROPERTIES heap{};heap.Type=D3D12_HEAP_TYPE_DEFAULT;heap.CreationNodeMask=heap.VisibleNodeMask=1;D3D12_RESOURCE_DESC desc{};desc.Dimension=D3D12_RESOURCE_DIMENSION_TEXTURE2D;desc.Width=w;desc.Height=h;desc.DepthOrArraySize=1;desc.MipLevels=1;desc.Format=DXGI_FORMAT_R8G8B8A8_UNORM;desc.SampleDesc.Count=1;desc.Layout=D3D12_TEXTURE_LAYOUT_UNKNOWN;desc.Flags=D3D12_RESOURCE_FLAG_ALLOW_RENDER_TARGET;check(d->CreateCommittedResource(&heap,D3D12_HEAP_FLAG_NONE,&desc,D3D12_RESOURCE_STATE_COMMON,nullptr,IID_PPV_ARGS(&e.resource)),"resident texture allocation");}a.entries.emplace(id,std::move(e));}
+static void transfer(Arena& a,uint64_t id,std::span<const uint8_t> input,std::span<uint8_t> output){a.healthy();auto& e=a.entries.at(id);bool uploading=!input.empty();auto d=a.gpu.device.Get();D3D12_PLACED_SUBRESOURCE_FOOTPRINT fp{};UINT64 total=e.bytes;if(e.w){auto desc=e.resource->GetDesc();d->GetCopyableFootprints(&desc,0,1,0,&fp,nullptr,nullptr,&total);}a.staging=buffer(d,total,uploading?D3D12_HEAP_TYPE_UPLOAD:D3D12_HEAP_TYPE_READBACK,uploading?D3D12_RESOURCE_STATE_GENERIC_READ:D3D12_RESOURCE_STATE_COPY_DEST);D3D12_RANGE empty{0,0},range{0,static_cast<SIZE_T>(total)};void* ptr=nullptr;
+ if(uploading){check(a.staging->Map(0,&empty,&ptr),"resident upload map");if(e.w){for(unsigned y=0;y<e.h;++y)std::memcpy(static_cast<uint8_t*>(ptr)+fp.Offset+size_t(y)*fp.Footprint.RowPitch,input.data()+size_t(y)*e.w*4,size_t(e.w)*4);}else std::memcpy(ptr,input.data(),input.size());a.staging->Unmap(0,&range);}
+ a.begin();auto state=uploading?D3D12_RESOURCE_STATE_COPY_DEST:D3D12_RESOURCE_STATE_COPY_SOURCE;a.barrier(e,D3D12_RESOURCE_STATE_COMMON,state);
+ if(e.w){D3D12_TEXTURE_COPY_LOCATION tex{},linear{};tex.pResource=e.resource.Get();tex.Type=D3D12_TEXTURE_COPY_TYPE_SUBRESOURCE_INDEX;tex.SubresourceIndex=0;linear.pResource=a.staging.Get();linear.Type=D3D12_TEXTURE_COPY_TYPE_PLACED_FOOTPRINT;linear.PlacedFootprint=fp;if(uploading)a.list->CopyTextureRegion(&tex,0,0,0,&linear,nullptr);else a.list->CopyTextureRegion(&linear,0,0,0,&tex,nullptr);}else if(uploading)a.list->CopyBufferRegion(e.resource.Get(),0,a.staging.Get(),0,e.bytes);else a.list->CopyBufferRegion(a.staging.Get(),0,e.resource.Get(),0,e.bytes);
+ a.barrier(e,state,D3D12_RESOURCE_STATE_COMMON);a.finish();
+ if(!uploading){check(a.staging->Map(0,&range,&ptr),"resident readback map");if(e.w){for(unsigned y=0;y<e.h;++y)std::memcpy(output.data()+size_t(y)*e.w*4,static_cast<const uint8_t*>(ptr)+fp.Offset+size_t(y)*fp.Footprint.RowPitch,size_t(e.w)*4);}else std::memcpy(output.data(),ptr,output.size());a.staging->Unmap(0,&empty);}a.staging.Reset();}
+void upload(Arena& a,uint64_t id,std::span<const uint8_t> bytes){transfer(a,id,bytes,{});}
+void read(Arena& a,uint64_t id,std::span<uint8_t> bytes){transfer(a,id,{},bytes);}
+void copy(Arena& a,uint64_t dst,uint64_t src){a.healthy();auto& d=a.entries.at(dst);auto& s=a.entries.at(src);a.begin();a.barrier(s,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COPY_SOURCE);a.barrier(d,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_COPY_DEST);a.list->CopyResource(d.resource.Get(),s.resource.Get());a.barrier(s,D3D12_RESOURCE_STATE_COPY_SOURCE,D3D12_RESOURCE_STATE_COMMON);a.barrier(d,D3D12_RESOURCE_STATE_COPY_DEST,D3D12_RESOURCE_STATE_COMMON);a.finish();}
+static ID3D12PipelineState* prepare_draw(Arena& a,const std::string& vertex_source,const std::string& pixel_source){
+ const bool programmable=!vertex_source.empty();auto key=std::make_pair(vertex_source,pixel_source);
+ if(!programmable&&a.draw_pso)return a.draw_pso.Get();
+ if(programmable){auto found=a.program_psos.find(key);if(found!=a.program_psos.end())return found->second.Get();if(a.program_psos.size()>=16)throw std::out_of_range("resident program pipeline capacity");}
+ auto d=a.gpu.device.Get();
+ static constexpr char shader[]=R"(
+ Texture2D<float4> sourceTex : register(t0);
+ Texture2D<float4> secondTex : register(t1);
+ cbuffer Options : register(b0) { uint mode; uint tint; };
+ float4 vs(float2 pos : POSITION) : SV_Position { return float4(pos,0,1); }
+ float4 ps(float4 pos : SV_Position) : SV_Target { float4 c=sourceTex.Load(int3(int2(pos.xy),0)); if(mode==1) return float4(1-c.rgb,c.a); if(mode==2) return (c+secondTex.Load(int3(int2(pos.xy),0)))*0.5; if(mode==3) return c*float4(tint&255,(tint>>8)&255,(tint>>16)&255,tint>>24)/255.0; return c; }
+ )";
+ auto compile=[&](const std::string& source,const char* entry,const char* profile){ComPtr<ID3DBlob> code,err;auto hr=D3DCompile(source.data(),source.size(),"resident-draw",nullptr,nullptr,entry,profile,D3DCOMPILE_ENABLE_STRICTNESS,0,&code,&err);if(FAILED(hr)&&err)std::cerr<<std::string(static_cast<const char*>(err->GetBufferPointer()),err->GetBufferSize())<<'\n';check(hr,"resident draw shader");return code;};
+ const std::string wrapper="\nV resident_vertex(float2 p : POSITION) { return vertex(float3(p,1),float2((p.x+1)*0.5,(1-p.y)*0.5)); }\n";
+ auto vs=compile(programmable?vertex_source+wrapper:shader,programmable?"resident_vertex":"vs","vs_5_1"),ps=compile(programmable?pixel_source:shader,programmable?"pixel":"ps","ps_5_1");
+ if(!a.draw_root){
+ D3D12_DESCRIPTOR_RANGE range{};range.RangeType=D3D12_DESCRIPTOR_RANGE_TYPE_SRV;range.NumDescriptors=2;
+ D3D12_ROOT_PARAMETER param[2]{};param[0].ParameterType=D3D12_ROOT_PARAMETER_TYPE_DESCRIPTOR_TABLE;param[0].DescriptorTable={1,&range};param[0].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;param[1].ParameterType=D3D12_ROOT_PARAMETER_TYPE_32BIT_CONSTANTS;param[1].Constants={0,0,2};param[1].ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+ D3D12_STATIC_SAMPLER_DESC sampler{};sampler.Filter=D3D12_FILTER_MIN_MAG_MIP_POINT;sampler.AddressU=sampler.AddressV=sampler.AddressW=D3D12_TEXTURE_ADDRESS_MODE_CLAMP;sampler.ComparisonFunc=D3D12_COMPARISON_FUNC_ALWAYS;sampler.MaxAnisotropy=1;sampler.MaxLOD=D3D12_FLOAT32_MAX;sampler.ShaderVisibility=D3D12_SHADER_VISIBILITY_PIXEL;
+ D3D12_ROOT_SIGNATURE_DESC rd{};rd.NumParameters=2;rd.pParameters=param;rd.NumStaticSamplers=1;rd.pStaticSamplers=&sampler;rd.Flags=D3D12_ROOT_SIGNATURE_FLAG_ALLOW_INPUT_ASSEMBLER_INPUT_LAYOUT;
+ ComPtr<ID3DBlob> sig,err;check(D3D12SerializeRootSignature(&rd,D3D_ROOT_SIGNATURE_VERSION_1,&sig,&err),"resident root signature");
+ check(d->CreateRootSignature(0,sig->GetBufferPointer(),sig->GetBufferSize(),IID_PPV_ARGS(&a.draw_root)),"resident draw root");
+ }
+ D3D12_INPUT_ELEMENT_DESC input{"POSITION",0,DXGI_FORMAT_R32G32_FLOAT,0,0,D3D12_INPUT_CLASSIFICATION_PER_VERTEX_DATA,0};
+ D3D12_GRAPHICS_PIPELINE_STATE_DESC p{};p.pRootSignature=a.draw_root.Get();p.VS={vs->GetBufferPointer(),vs->GetBufferSize()};p.PS={ps->GetBufferPointer(),ps->GetBufferSize()};p.InputLayout={&input,1};p.SampleMask=UINT_MAX;
+ p.RasterizerState.FillMode=D3D12_FILL_MODE_SOLID;p.RasterizerState.CullMode=D3D12_CULL_MODE_NONE;p.RasterizerState.DepthClipEnable=TRUE;p.PrimitiveTopologyType=D3D12_PRIMITIVE_TOPOLOGY_TYPE_TRIANGLE;p.SampleDesc.Count=1;p.NumRenderTargets=1;p.RTVFormats[0]=DXGI_FORMAT_R8G8B8A8_UNORM;
+ for(auto& t:p.BlendState.RenderTarget){t.SrcBlend=D3D12_BLEND_ONE;t.DestBlend=D3D12_BLEND_ZERO;t.BlendOp=D3D12_BLEND_OP_ADD;t.SrcBlendAlpha=D3D12_BLEND_ONE;t.DestBlendAlpha=D3D12_BLEND_ZERO;t.BlendOpAlpha=D3D12_BLEND_OP_ADD;t.LogicOp=D3D12_LOGIC_OP_NOOP;t.RenderTargetWriteMask=D3D12_COLOR_WRITE_ENABLE_ALL;}
+ auto& ds=p.DepthStencilState;ds.DepthWriteMask=D3D12_DEPTH_WRITE_MASK_ZERO;ds.DepthFunc=D3D12_COMPARISON_FUNC_ALWAYS;ds.FrontFace={D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_STENCIL_OP_KEEP,D3D12_COMPARISON_FUNC_ALWAYS};ds.BackFace=ds.FrontFace;
+ if(!a.draw_srv)a.draw_srv=descriptors(d,D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV,64,true);if(!a.draw_rtv)a.draw_rtv=descriptors(d,D3D12_DESCRIPTOR_HEAP_TYPE_RTV,32,false);
+ ComPtr<ID3D12PipelineState> pipeline;check(d->CreateGraphicsPipelineState(&p,IID_PPV_ARGS(&pipeline)),"resident indexed PSO");
+ if(programmable)return a.program_psos.emplace(std::move(key),std::move(pipeline)).first->second.Get();a.draw_pso=std::move(pipeline);return a.draw_pso.Get();
+}
+static void record_draw(Arena& a,const Draw& cmd,ID3D12PipelineState* pipeline,unsigned slot){
+ auto target=cmd.target,texture=cmd.texture,vertices=cmd.vertices,indices=cmd.indices,second_texture=cmd.second;auto count=cmd.count,mode=cmd.mode,tint=cmd.tint;
+ auto d=a.gpu.device.Get();auto& t=a.entries.at(target);auto& x=a.entries.at(texture);auto& v=a.entries.at(vertices);auto& i=a.entries.at(indices);auto& x2=a.entries.at(second_texture);
+ auto rtv=a.draw_rtv->GetCPUDescriptorHandleForHeapStart();rtv.ptr+=slot*d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);d->CreateRenderTargetView(t.resource.Get(),nullptr,rtv);
+ D3D12_SHADER_RESOURCE_VIEW_DESC sd{};sd.Format=DXGI_FORMAT_R8G8B8A8_UNORM;sd.ViewDimension=D3D12_SRV_DIMENSION_TEXTURE2D;sd.Shader4ComponentMapping=D3D12_DEFAULT_SHADER_4_COMPONENT_MAPPING;sd.Texture2D.MipLevels=1;auto srv=a.draw_srv->GetCPUDescriptorHandleForHeapStart();srv.ptr+=2*slot*d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);d->CreateShaderResourceView(x.resource.Get(),&sd,srv);srv.ptr+=d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);d->CreateShaderResourceView(x2.resource.Get(),&sd,srv);
+ a.barrier(t,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_RENDER_TARGET);a.barrier(x,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);if(texture!=second_texture)a.barrier(x2,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE);a.barrier(v,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER);a.barrier(i,D3D12_RESOURCE_STATE_COMMON,D3D12_RESOURCE_STATE_INDEX_BUFFER);
+ a.list->SetGraphicsRootSignature(a.draw_root.Get());a.list->SetPipelineState(pipeline);ID3D12DescriptorHeap* heaps[]={a.draw_srv.Get()};a.list->SetDescriptorHeaps(1,heaps);auto gpu_srv=a.draw_srv->GetGPUDescriptorHandleForHeapStart();gpu_srv.ptr+=2*slot*d->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_CBV_SRV_UAV);a.list->SetGraphicsRootDescriptorTable(0,gpu_srv);const unsigned constants[]={mode,tint};a.list->SetGraphicsRoot32BitConstants(1,2,constants,0);
+ D3D12_VIEWPORT vp{0,0,float(t.w),float(t.h),0,1};D3D12_RECT sc{0,0,LONG(t.w),LONG(t.h)};a.list->RSSetViewports(1,&vp);a.list->RSSetScissorRects(1,&sc);a.list->OMSetRenderTargets(1,&rtv,FALSE,nullptr);const float clear[4]={0,0,0,0};a.list->ClearRenderTargetView(rtv,clear,0,nullptr);
+ D3D12_VERTEX_BUFFER_VIEW vb{v.resource->GetGPUVirtualAddress(),UINT(v.bytes),8};D3D12_INDEX_BUFFER_VIEW ib{i.resource->GetGPUVirtualAddress(),UINT(i.bytes),DXGI_FORMAT_R16_UINT};a.list->IASetVertexBuffers(0,1,&vb);a.list->IASetIndexBuffer(&ib);a.list->IASetPrimitiveTopology(D3D_PRIMITIVE_TOPOLOGY_TRIANGLELIST);a.list->DrawIndexedInstanced(count,1,0,0,0);
+ a.barrier(t,D3D12_RESOURCE_STATE_RENDER_TARGET,D3D12_RESOURCE_STATE_COMMON);a.barrier(x,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COMMON);if(texture!=second_texture)a.barrier(x2,D3D12_RESOURCE_STATE_PIXEL_SHADER_RESOURCE,D3D12_RESOURCE_STATE_COMMON);a.barrier(v,D3D12_RESOURCE_STATE_VERTEX_AND_CONSTANT_BUFFER,D3D12_RESOURCE_STATE_COMMON);a.barrier(i,D3D12_RESOURCE_STATE_INDEX_BUFFER,D3D12_RESOURCE_STATE_COMMON);
+}
+void draw_batch(Arena& a,std::span<const Draw> commands,bool asynchronous){
+ a.healthy();if(commands.empty()||commands.size()>32)throw std::out_of_range("batch size");
+ std::array<ID3D12PipelineState*,32> pipelines{};
+ for(size_t n=0;n<commands.size();++n)pipelines[n]=prepare_draw(a,commands[n].vs,commands[n].ps);
+ a.begin();for(unsigned n=0;n<commands.size();++n)record_draw(a,commands[n],pipelines[n],n);a.finish(asynchronous);
+}
+bool batch_complete(Arena& a,unsigned timeout_ms){
+ if(a.failed)throw std::runtime_error("resident arena failed");
+ if(!a.pending)return true;
+ const auto deadline=std::chrono::steady_clock::now()+std::chrono::milliseconds(timeout_ms);
+ for(;;){auto value=a.fence->GetCompletedValue();if(value==UINT64_MAX){a.failed=true;a.pending=false;throw std::runtime_error("resident device removed");}if(value>=a.sequence){a.pending=false;return true;}if(std::chrono::steady_clock::now()>=deadline)return false;Sleep(1);}
+}
+uint64_t submission_count(const Arena& a){return a.sequence;}
+void draw(Arena& a,uint64_t target,uint64_t texture,uint64_t vertices,uint64_t indices,unsigned count,uint64_t second_texture,unsigned mode,unsigned tint,const std::string& vertex_source,const std::string& pixel_source){
+ const Draw cmd{target,texture,vertices,indices,count,second_texture,mode,tint,vertex_source,pixel_source};draw_batch(a,{&cmd,1});
+}
+void prepare_program(Arena& a,const std::string& vertex_source,const std::string& pixel_source){a.healthy();prepare_draw(a,vertex_source,pixel_source);}
+uint64_t program_count(const Arena& a){return a.program_psos.size();}
+uint64_t clear_programs(Arena& a){a.healthy();auto n=a.program_psos.size();a.program_psos.clear();return n;}
+void release(Arena& a,uint64_t id){a.healthy();a.entries.erase(id);}
+}
